@@ -133,13 +133,22 @@ button { color: inherit; cursor: pointer; }
 
 .game-screen { position: fixed; inset: 0; overflow: hidden; background: #030611; direction: ltr; }
 #minimap { position: fixed; z-index: 5; top: calc(var(--safe-top) + 64px); left: var(--safe-left); width: 168px; height: 98px; border: 1px solid rgba(32,217,255,.55); border-radius: 12px; background: rgba(2,8,18,.78); box-shadow: 0 0 24px rgba(32,217,255,.13), inset 0 0 18px rgba(5,25,42,.8); }
-.crosshair { position: fixed; z-index: 4; top: 50%; left: 50%; width: 34px; height: 34px; transform: translate(-50%,-50%); pointer-events: none; filter: drop-shadow(0 0 5px #20d9ff); }
+.crosshair { position: fixed; z-index: 4; top: 50%; left: 50%; width: 32px; height: 32px; transform: translate(-50%,-50%); pointer-events: none; filter: drop-shadow(0 0 5px #20d9ff); transition: filter .08s; }
 .crosshair i { position: absolute; display: block; background: rgba(218,251,255,.92); }
-.crosshair i:first-child { width: 2px; height: 34px; left: 16px; top: 0; }
-.crosshair i:last-child { width: 34px; height: 2px; left: 0; top: 16px; }
-.crosshair::after { content: ""; position: absolute; inset: 12px; border: 2px solid #20d9ff; border-radius: 50%; background: #07101c; }
+.crosshair i:first-child { width: 2px; height: 32px; left: 15px; top: 0; }
+.crosshair i:last-child { width: 32px; height: 2px; left: 0; top: 15px; }
+.crosshair::after { content: ""; position: absolute; inset: 11px; border: 2px solid #20d9ff; border-radius: 50%; background: #07101c; transition: .08s; }
+.crosshair.locked { filter: drop-shadow(0 0 8px #9dff24); }
+.crosshair.locked i { background: #ecffc6; }
+.crosshair.locked::after { border-color: #9dff24; background: rgba(33,58,5,.82); }
+.crosshair.hit { animation: hit-marker .13s ease-out; filter: drop-shadow(0 0 11px #fff29a); }
+.crosshair.hit::after { border-color: #fff29a; }
+@keyframes hit-marker { 50% { transform: translate(-50%,-50%) scale(1.55) rotate(45deg); } }
+.damage-flash { position: fixed; z-index: 4; inset: 0; pointer-events: none; opacity: 0; border: 10px solid rgba(255,35,82,.0); box-shadow: inset 0 0 90px rgba(255,22,61,.0); }
+.damage-flash.show { animation: damage-pulse .28s ease-out; }
+@keyframes damage-pulse { 20% { opacity: 1; border-color: rgba(255,35,82,.42); box-shadow: inset 0 0 90px rgba(255,22,61,.38); } 100% { opacity: 0; } }
 #arena { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.look-surface { position: fixed; z-index: 3; inset: 0 0 0 34%; touch-action: none; cursor: crosshair; }
+.look-surface { position: fixed; z-index: 3; inset: 0 0 0 31%; touch-action: none; cursor: crosshair; }
 .desktop-help { display: none; position: fixed; z-index: 5; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 7px 14px; border: 1px solid rgba(32,217,255,.3); border-radius: 20px; background: rgba(2,8,18,.72); color: #b7eefa; font: 11px Tahoma,sans-serif; direction: rtl; pointer-events: none; }
 .hud-card {
   border: 1px solid rgba(67, 217, 255, .38);
@@ -228,6 +237,7 @@ button { color: inherit; cursor: pointer; }
   .move-pad,.right-controls { display:none; }
   .look-surface { inset:0; }
   .desktop-help { display:block; }
+  .mouse-locked .desktop-help { opacity: .22; }
 }
 .ability-row { position: absolute; top: 0; right: 8px; display: flex; gap: 9px; pointer-events: auto; }
 .ability { position: relative; width: 48px; height: 48px; overflow: hidden; border: 1px solid rgba(32,217,255,.45); border-radius: 50%; background: rgba(5,22,41,.78); color: var(--cyan); font-size: 24px; box-shadow: 0 0 14px rgba(32,217,255,.08); }

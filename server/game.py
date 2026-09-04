@@ -17,7 +17,7 @@ else:
 ARENA_WIDTH = 1200
 ARENA_HEIGHT = 700
 PLAYER_RADIUS = 21
-PLAYER_SPEED = 275.0
+PLAYER_SPEED = 285.0
 BULLET_SPEED = 650.0
 ROUND_SECONDS = 120
 STARTING_LIVES = 3
@@ -46,23 +46,23 @@ COLORS = [
 # A compact three-lane FPS arena: two spawn yards, a central court and
 # alternate upper/lower routes. Rectangles keep collision/network packets tiny.
 OBSTACLES = [
-    {"x": 150, "y": 105, "w": 300, "h": 42},
-    {"x": 150, "y": 147, "w": 42, "h": 150},
-    {"x": 330, "y": 220, "w": 120, "h": 42},
-    {"x": 535, "y": 70, "w": 42, "h": 190},
-    {"x": 675, "y": 70, "w": 42, "h": 190},
-    {"x": 800, "y": 120, "w": 255, "h": 42},
-    {"x": 1013, "y": 162, "w": 42, "h": 145},
-    {"x": 470, "y": 322, "w": 260, "h": 56},
-    {"x": 145, "y": 430, "w": 42, "h": 155},
-    {"x": 145, "y": 543, "w": 300, "h": 42},
-    {"x": 325, "y": 468, "w": 120, "h": 42},
-    {"x": 535, "y": 440, "w": 42, "h": 190},
-    {"x": 675, "y": 440, "w": 42, "h": 190},
-    {"x": 805, "y": 538, "w": 250, "h": 42},
-    {"x": 1013, "y": 393, "w": 42, "h": 145},
-    {"x": 265, "y": 330, "w": 95, "h": 42},
-    {"x": 840, "y": 330, "w": 95, "h": 42},
+    {"x": 150, "y": 105, "w": 300, "h": 42, "height": 74},
+    {"x": 150, "y": 147, "w": 42, "h": 150, "height": 58},
+    {"x": 330, "y": 220, "w": 120, "h": 42, "height": 46},
+    {"x": 535, "y": 70, "w": 42, "h": 190, "height": 82},
+    {"x": 675, "y": 70, "w": 42, "h": 190, "height": 82},
+    {"x": 800, "y": 120, "w": 255, "h": 42, "height": 70},
+    {"x": 1013, "y": 162, "w": 42, "h": 145, "height": 56},
+    {"x": 470, "y": 322, "w": 260, "h": 56, "height": 62},
+    {"x": 145, "y": 430, "w": 42, "h": 155, "height": 56},
+    {"x": 145, "y": 543, "w": 300, "h": 42, "height": 74},
+    {"x": 325, "y": 468, "w": 120, "h": 42, "height": 46},
+    {"x": 535, "y": 440, "w": 42, "h": 190, "height": 82},
+    {"x": 675, "y": 440, "w": 42, "h": 190, "height": 82},
+    {"x": 805, "y": 538, "w": 250, "h": 42, "height": 70},
+    {"x": 1013, "y": 393, "w": 42, "h": 145, "height": 56},
+    {"x": 265, "y": 330, "w": 95, "h": 42, "height": 44},
+    {"x": 840, "y": 330, "w": 95, "h": 42, "height": 44},
 ]
 
 POWERUP_LABELS = {
@@ -236,6 +236,7 @@ class Bullet:
     y2: float
     color: str
     expires_at: float
+    hit: bool = False
 
     def public(self) -> dict[str, Any]:
         return {
@@ -246,6 +247,7 @@ class Bullet:
             "x2": round(self.x2, 1),
             "y2": round(self.y2, 1),
             "color": self.color,
+            "hit": self.hit,
         }
 
 
@@ -436,7 +438,7 @@ class Room:
         await self.broadcast_event("start", "راند سه‌جان شروع می‌شود")
 
     async def _loop(self) -> None:
-        tick = 1 / 45
+        tick = 1 / 60
         snapshot_clock = 0.0
         last = time.monotonic()
         while not self.closed:
@@ -459,7 +461,7 @@ class Room:
                 self._check_round_end(now)
 
             snapshot_clock += dt
-            if snapshot_clock >= 1 / 20:
+            if snapshot_clock >= 1 / 30:
                 snapshot_clock = 0.0
                 await self.broadcast_state(now)
 
@@ -594,7 +596,8 @@ class Room:
                     start_x + dx * end_distance,
                     start_y + dy * end_distance,
                     player.color,
-                    now + 0.18,
+                    now + 0.16,
+                    hit=target is not None,
                 )
             )
             if target is not None:

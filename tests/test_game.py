@@ -43,6 +43,7 @@ class GameRulesTests(unittest.TestCase):
         self.assertLess(target.health, 100)
         self.assertEqual(len(room.bullets), 1)
         self.assertGreater(room.bullets[0].x2, room.bullets[0].x1)
+        self.assertTrue(room.bullets[0].hit)
 
         target.health = 100
         shooter.last_shot = 0
@@ -50,6 +51,7 @@ class GameRulesTests(unittest.TestCase):
         target.x, target.y = 400, 350
         room._fire(shooter, time.monotonic())
         self.assertEqual(target.health, 100)
+        self.assertFalse(room.bullets[-1].hit)
 
     def test_normalize_caps_vector(self) -> None:
         x, y = normalize(3, 4)
@@ -66,6 +68,7 @@ class GameRulesTests(unittest.TestCase):
     def test_obstacle_positions_are_blocked(self) -> None:
         obstacle = OBSTACLES[0]
         self.assertFalse(clear_position(obstacle["x"] + 10, obstacle["y"] + 10))
+        self.assertTrue(all(40 <= obstacle["height"] <= 100 for obstacle in OBSTACLES))
 
     def test_room_codes_are_unique_and_mobile_friendly(self) -> None:
         hub = GameHub()

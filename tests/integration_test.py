@@ -31,14 +31,14 @@ def http_json(method: str, path: str) -> dict:
 async def main() -> None:
     health = await asyncio.to_thread(http_json, "GET", "/health")
     assert health["ok"] is True
-    assert health["version"] == "2.0.0"
-    assert health["protocol"] == "5"
+    assert health["version"] == "2.1.0"
+    assert health["protocol"] == "6"
     room = await asyncio.to_thread(http_json, "POST", "/api/rooms")
     code = room["code"]
 
     async with (
-        websockets.connect(f"{BASE_WS}/ws/{code}?name=One&protocol=5&client=android", proxy=None) as first,
-        websockets.connect(f"{BASE_WS}/ws/{code}?name=Two&protocol=5&client=web", proxy=None) as second,
+        websockets.connect(f"{BASE_WS}/ws/{code}?name=One&protocol=6&client=android", proxy=None) as first,
+        websockets.connect(f"{BASE_WS}/ws/{code}?name=Two&protocol=6&client=web", proxy=None) as second,
     ):
         welcome_one = await receive_type(first, "welcome")
         welcome_two = await receive_type(second, "welcome")

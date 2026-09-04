@@ -10,6 +10,7 @@
   const canvas = $("arena");
   const renderer3D = window.NeonRenderer3D?.create(canvas) || null;
   const ctx = renderer3D ? null : canvas.getContext("2d", { alpha: false });
+  const coarsePointer = matchMedia("(pointer: coarse)").matches;
   const minimap = $("minimap");
   const mapCtx = minimap.getContext("2d");
   const healthFill = $("healthFill");
@@ -27,6 +28,8 @@
   const weaponChooser = $("weaponChooser");
   const botControls = $("botControls");
   const toast = $("toast");
+  const crosshair = document.querySelector(".crosshair");
+  const damageFlash = $("damageFlash");
 
   const weaponNames = {
     base: "معمولی",
@@ -44,16 +47,16 @@
   };
 
   const localWeaponSpecs = {
-    base: { interval: 240, speed: 650, radius: 6, spread: [0] },
-    heavy: { interval: 420, speed: 570, radius: 9, spread: [0] },
-    rapid: { interval: 120, speed: 760, radius: 5, spread: [0] },
-    spread: { interval: 360, speed: 640, radius: 5, spread: [-.17, 0, .17] },
+    base: { interval: 220, radius: 6, spread: [0] },
+    heavy: { interval: 460, radius: 9, spread: [0] },
+    rapid: { interval: 105, radius: 5, spread: [-.015, .015] },
+    spread: { interval: 390, radius: 5, spread: [-.09, 0, .09] },
   };
 
   const isAndroidApp = location.protocol === "file:";
   const httpOrigin = isAndroidApp ? "https://game.chanelchat.ir" : location.origin;
   const wsOrigin = isAndroidApp ? "wss://game.chanelchat.ir" : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
-  const protocolVersion = "5";
+  const protocolVersion = "6";
   if (isAndroidApp) $("downloadAndroid")?.classList.add("hidden");
 
   const app = {
@@ -62,20 +65,22 @@
     room: null,
     hostId: null,
     state: null,
+    stateReceivedAt: performance.now(),
     arena: { width: 1200, height: 700, obstacles: [] },
     move: [0, 0],
     padMove: [0, 0],
     aim: [1, 0],
     cameraAngle: 0,
     cameraPitch: 0,
-    lookVelocity: [0, 0],
     moveVisual: 0,
-    manualAim: false,
+    assistTargetId: null,
     shooting: false,
     inputSeq: 0,
     lastAck: 0,
     localBullets: [],
     lastPredictedShot: 0,
+    muzzleUntil: 0,
+    weaponRecoil: 0,
     previousHealth: 100,
     effects: [],
     renderPlayers: new Map(),
@@ -190,6 +195,7 @@
     if (message.type === "state") {
       const previous = app.state;
       app.state = message;
+      app.stateReceivedAt = performance.now();
       app.hostId = message.hostId;
       updateHud(previous);
       return;
@@ -216,6 +222,11 @@
     if (me.health < app.previousHealth) {
       navigator.vibrate?.(35);
       app.effects.push({ type: "flash", born: performance.now(), color: "#ff2d62" });
+      if (damageFlash) {
+        damageFlash.classList.remove("show");
+        void damageFlash.offsetWidth;
+        damageFlash.classList.add("show");
+      }
     }
     app.previousHealth = me.health;
     const mins = Math.floor(state.remaining / 60).toString().padStart(2, "0");
@@ -232,11 +243,24 @@
       for (const bullet of state.bullets) {
         if (!oldIds.has(bullet.id)) {
           app.effects.push({ type: "muzzle", born: performance.now(), x: bullet.x1 ?? bullet.x, y: bullet.y1 ?? bullet.y, color: bullet.color });
-          if (bullet.owner === app.playerId) acknowledgePredictedBullet(bullet);
+          if (bullet.owner === app.playerId) {
+            acknowledgePredictedBullet(bullet);
+            if (bullet.hit) showHitConfirmation();
+          }
           else playShot(false);
         }
       }
     }
+  }
+
+  function showHitConfirmation() {
+    crosshair?.classList.remove("hit");
+    void crosshair?.offsetWidth;
+    crosshair?.classList.add("hit");
+    clearTimeout(showHitConfirmation.timer);
+    showHitConfirmation.timer = setTimeout(() => crosshair?.classList.remove("hit"), 130);
+    navigator.vibrate?.(14);
+    playHit();
   }
 
   function updateScores(players) {
@@ -312,6 +336,8 @@
       onChange(dx / radius, dy / radius, distance / radius);
     };
     element.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      if (pointer !== null) return;
       pointer = event.pointerId;
       element.setPointerCapture(pointer);
       update(event);
@@ -335,51 +361,79 @@
 
   setupPad($("movePad"), (x, y, distance) => {
     const rawStrength = Math.min(1, distance);
-    const strength = rawStrength < .08 ? 0 : (rawStrength - .08) / .92;
+    const strength = rawStrength < .12 ? 0 : (rawStrength - .12) / .88;
     const directionLength = Math.hypot(x, y) || 1;
     app.padMove = [x / directionLength * strength, y / directionLength * strength];
   }, () => { app.padMove = [0, 0]; });
+
   const lookSurface = $("lookSurface");
   const fireButton = $("fireButton");
   let fireStopTimer = null;
   let lookPointer = null;
   let lookX = 0;
   let lookY = 0;
+
+  function rotateCamera(dx, dy, pointerType) {
+    const mouse = pointerType === "mouse";
+    const yawSensitivity = mouse ? .00215 : .00405;
+    const pitchSensitivity = mouse ? .00175 : .00315;
+    app.cameraAngle += Math.max(-90, Math.min(90, dx)) * yawSensitivity;
+    app.cameraPitch = Math.max(-.48, Math.min(.42, app.cameraPitch - Math.max(-70, Math.min(70, dy)) * pitchSensitivity));
+  }
+
   lookSurface.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse") {
+      event.preventDefault();
+      lookSurface.requestPointerLock?.();
+      if (event.button === 0) beginShooting();
+      return;
+    }
     if (lookPointer !== null) return;
+    event.preventDefault();
     lookPointer = event.pointerId;
     lookX = event.clientX;
     lookY = event.clientY;
     lookSurface.setPointerCapture(event.pointerId);
-    if (event.pointerType === "mouse") {
-      lookSurface.requestPointerLock?.();
-      if (event.button === 0) beginShooting();
-    }
   });
   lookSurface.addEventListener("pointermove", (event) => {
-    if (event.pointerId !== lookPointer && document.pointerLockElement !== lookSurface) return;
-    const dx = document.pointerLockElement === lookSurface ? event.movementX : event.clientX - lookX;
-    const dy = document.pointerLockElement === lookSurface ? event.movementY : event.clientY - lookY;
+    if (event.pointerType === "mouse" || event.pointerId !== lookPointer) return;
+    event.preventDefault();
+    const dx = event.clientX - lookX;
+    const dy = event.clientY - lookY;
     lookX = event.clientX;
     lookY = event.clientY;
-    const sensitivity = event.pointerType === "mouse" ? .0025 : .0042;
-    app.cameraAngle += Math.max(-55, Math.min(55, dx)) * sensitivity;
-    app.cameraPitch = Math.max(-.16, Math.min(.16, app.cameraPitch - Math.max(-45, Math.min(45, dy)) * sensitivity * .55));
-    app.lookVelocity = [dx * sensitivity, dy * sensitivity];
-    app.manualAim = true;
+    rotateCamera(dx, dy, event.pointerType);
   });
   const endLook = (event) => {
     if (event.pointerId !== lookPointer) return;
     lookPointer = null;
-    app.lookVelocity = [0, 0];
-    if (event.pointerType === "mouse" && event.button === 0) endShooting();
   };
   lookSurface.addEventListener("pointerup", endLook);
   lookSurface.addEventListener("pointercancel", endLook);
+  lookSurface.addEventListener("contextmenu", (event) => event.preventDefault());
+
+  document.addEventListener("mousemove", (event) => {
+    if (document.pointerLockElement === lookSurface) rotateCamera(event.movementX, event.movementY, "mouse");
+  });
+  document.addEventListener("pointerlockchange", () => {
+    gameScreen.classList.toggle("mouse-locked", document.pointerLockElement === lookSurface);
+  });
+  document.addEventListener("mousedown", (event) => {
+    if (coarsePointer || gameScreen.classList.contains("hidden") || event.target.closest?.("button,input,a")) return;
+    if (event.button === 0) {
+      event.preventDefault();
+      lookSurface.requestPointerLock?.();
+      beginShooting();
+    }
+  });
+  document.addEventListener("mouseup", (event) => {
+    if (event.button === 0) endShooting();
+  });
 
   function beginShooting() {
     clearTimeout(fireStopTimer);
     app.shooting = true;
+    app.aim = resolvedAim();
     fireButton.classList.add("active");
     ensureAudio();
   }
@@ -404,19 +458,23 @@
   function automaticAim() {
     const me = app.state?.players.find((player) => player.id === app.playerId);
     if (!me?.alive) return null;
-    let nearest = null;
-    let nearestDistance = 420;
+    let best = null;
+    let bestScore = Infinity;
+    const cone = coarsePointer ? .31 : .14;
+    const maximumDistance = coarsePointer ? 560 : 480;
     for (const player of app.state.players) {
       if (player.id === me.id || !player.alive || player.lives <= 0) continue;
       const distance = Math.hypot(player.x - me.x, player.y - me.y);
       const direction = Math.atan2(player.y - me.y, player.x - me.x);
-      const angleError = Math.abs(Math.atan2(Math.sin(direction - app.cameraAngle), Math.cos(direction - app.cameraAngle)));
-      if (distance < nearestDistance && angleError < .18 && hasLineOfSight(me.x, me.y, player.x, player.y)) {
-        nearest = player;
-        nearestDistance = distance;
+      const delta = Math.atan2(Math.sin(direction - app.cameraAngle), Math.cos(direction - app.cameraAngle));
+      const angleError = Math.abs(delta);
+      const score = angleError * 900 + distance;
+      if (distance < maximumDistance && angleError < cone && score < bestScore && hasLineOfSight(me.x, me.y, player.x, player.y)) {
+        best = { player, direction, delta, distance };
+        bestScore = score;
       }
     }
-    return nearest ? [nearest.x - me.x, nearest.y - me.y] : null;
+    return best;
   }
 
   function hasLineOfSight(x1, y1, x2, y2) {
@@ -430,8 +488,14 @@
   }
 
   function resolvedAim() {
-    const targetAim = app.shooting ? automaticAim() : null;
-    if (targetAim) return targetAim;
+    const target = automaticAim();
+    app.assistTargetId = target?.player.id || null;
+    crosshair?.classList.toggle("locked", Boolean(target));
+    if (target && app.shooting) {
+      const pull = coarsePointer ? .16 : .055;
+      app.cameraAngle += target.delta * pull;
+      return [Math.cos(target.direction), Math.sin(target.direction)];
+    }
     return [Math.cos(app.cameraAngle), Math.sin(app.cameraAngle)];
   }
 
@@ -474,9 +538,15 @@
 
   function playShot(isMine) {
     if (!app.audioContext || app.audioMuted) return;
-    const base = isMine ? 150 : 105;
-    tone(base, .075, isMine ? .075 : .025, "square");
-    tone(base * 2.2, .045, isMine ? .035 : .012, "sawtooth", .008);
+    const base = isMine ? 128 : 92;
+    tone(base, .065, isMine ? .065 : .018, "square");
+    tone(base * 2.8, .038, isMine ? .028 : .009, "sawtooth", .006);
+  }
+
+  function playHit() {
+    if (!app.audioContext || app.audioMuted) return;
+    tone(720, .055, .025, "triangle");
+    tone(980, .04, .018, "sine", .025);
   }
 
   function predictShot(now) {
@@ -486,6 +556,8 @@
     const spec = localWeaponSpecs[me.weapon] || localWeaponSpecs.base;
     if (now - app.lastPredictedShot < spec.interval) return;
     app.lastPredictedShot = now;
+    app.muzzleUntil = now + 58;
+    app.weaponRecoil = Math.min(7, app.weaponRecoil + (me.weapon === "heavy" ? 5.5 : 3.2));
     const rendered = app.renderPlayers.get(me.id) || me;
     const length = Math.hypot(app.aim[0], app.aim[1]) || 1;
     const baseAngle = Math.atan2(app.aim[1] / length, app.aim[0] / length);
@@ -599,14 +671,15 @@
   });
 
   window.addEventListener("keydown", (event) => {
+    if ([" ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) event.preventDefault();
     app.keys.add(event.key.toLowerCase());
-    if (event.key === " ") app.shooting = true;
+    if (event.key === " ") beginShooting();
     if (event.key.toLowerCase() === "e") action("shield");
     if (event.key.toLowerCase() === "shift") action("dash");
   });
-  window.addEventListener("keyup", (event) => { app.keys.delete(event.key.toLowerCase()); if (event.key === " ") app.shooting = false; });
-  window.addEventListener("pointerup", (event) => {
-    if (event.pointerType === "mouse" && event.button === 0 && document.pointerLockElement === lookSurface) endShooting();
+  window.addEventListener("keyup", (event) => {
+    app.keys.delete(event.key.toLowerCase());
+    if (event.key === " ") endShooting();
   });
 
   function releaseInput() {
@@ -614,8 +687,7 @@
     app.padMove = [0, 0];
     app.move = [0, 0];
     app.shooting = false;
-    app.manualAim = false;
-    app.lookVelocity = [0, 0];
+    fireButton.classList.remove("active");
     app.keys.clear();
     app.inputSeq += 1;
     send({ type: "input", seq: app.inputSeq, move: [0, 0], aim: app.aim, shooting: false });
@@ -623,18 +695,24 @@
   window.addEventListener("blur", releaseInput);
   document.addEventListener("visibilitychange", () => { if (document.hidden) releaseInput(); });
 
-  setInterval(() => {
+  function sampleAndSendInput() {
     const x = (app.keys.has("d") || app.keys.has("arrowright") ? 1 : 0) - (app.keys.has("a") || app.keys.has("arrowleft") ? 1 : 0);
     const y = (app.keys.has("s") || app.keys.has("arrowdown") ? 1 : 0) - (app.keys.has("w") || app.keys.has("arrowup") ? 1 : 0);
     app.aim = resolvedAim();
-    const local = x || y ? [x, y] : app.padMove;
+    const local = x || y ? [x, y] : [...app.padMove];
+    const localLength = Math.hypot(local[0], local[1]);
+    if (localLength > 1) {
+      local[0] /= localLength;
+      local[1] /= localLength;
+    }
     const heading = app.cameraAngle;
     const forward = -local[1];
     const strafe = local[0];
     app.move = [Math.cos(heading) * forward - Math.sin(heading) * strafe, Math.sin(heading) * forward + Math.cos(heading) * strafe];
     app.inputSeq += 1;
     send({ type: "input", seq: app.inputSeq, move: app.move, aim: app.aim, shooting: app.shooting });
-  }, 33);
+  }
+  setInterval(sampleAndSendInput, 20);
 
   function toFaDigits(value) {
     return String(value).replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[digit]);
@@ -671,6 +749,7 @@
     app.lastFrame = now;
     if (!renderer3D) drawBackground(now);
     if (!app.state) return;
+    app.weaponRecoil *= Math.exp(-19 * dt);
     if (renderer3D) {
       predictShot(now);
       updatePredictedBullets(dt, now);
@@ -681,7 +760,8 @@
       if (me) renderer3D.render({
         arena: app.arena, me, players, powerups: app.state.powerups || [],
         traces: [...app.state.bullets, ...app.localBullets], angle: app.cameraAngle,
-        pitch: app.cameraPitch, now, dt, shooting: app.shooting, move: app.move
+        pitch: app.cameraPitch, now, dt, shooting: app.shooting, move: app.move,
+        muzzle: now < app.muzzleUntil, recoil: app.weaponRecoil
       });
       drawMinimap();
       return;
@@ -904,22 +984,29 @@
 
   function smoothPlayer(player, dt) {
     let rendered = app.renderPlayers.get(player.id);
-    if (!rendered || Math.hypot(rendered.x - player.x, rendered.y - player.y) > 210) {
+    if (!rendered || Math.hypot(rendered.x - player.x, rendered.y - player.y) > 120) {
       rendered = { x: player.x, y: player.y };
       app.renderPlayers.set(player.id, rendered);
     }
 
     if (player.id === app.playerId && player.alive && app.state.phase === "playing") {
-      let speed = 275 * (player.speedBoost ? 1.55 : 1) * (player.dashing ? 2.55 : 1);
+      let speed = 285 * (player.speedBoost ? 1.55 : 1) * (player.dashing ? 2.55 : 1);
       const nextX = Math.max(21, Math.min(app.arena.width - 21, rendered.x + app.move[0] * speed * dt));
       if (isClearLocal(nextX, rendered.y)) rendered.x = nextX;
       const nextY = Math.max(21, Math.min(app.arena.height - 21, rendered.y + app.move[1] * speed * dt));
       if (isClearLocal(rendered.x, nextY)) rendered.y = nextY;
-      const correction = 1 - Math.exp(-7 * dt);
-      rendered.x += (player.x - rendered.x) * correction;
-      rendered.y += (player.y - rendered.y) * correction;
+      const error = Math.hypot(player.x - rendered.x, player.y - rendered.y);
+      if (error > 70) {
+        rendered.x = player.x;
+        rendered.y = player.y;
+      } else if (error > 9) {
+        const moving = Math.hypot(app.move[0], app.move[1]) > .05;
+        const correction = 1 - Math.exp(-(moving ? 2.2 : 11) * dt);
+        rendered.x += (player.x - rendered.x) * correction;
+        rendered.y += (player.y - rendered.y) * correction;
+      }
     } else {
-      const interpolation = 1 - Math.exp(-15 * dt);
+      const interpolation = 1 - Math.exp(-18 * dt);
       rendered.x += (player.x - rendered.x) * interpolation;
       rendered.y += (player.y - rendered.y) * interpolation;
     }
@@ -951,17 +1038,24 @@
 
   function drawBullet(bullet) {
     ctx.save();
-    ctx.strokeStyle = bullet.color;
+    ctx.strokeStyle = bullet.hit ? "#fff29a" : bullet.color;
     ctx.fillStyle = "#fff";
-    ctx.shadowColor = bullet.color;
+    ctx.shadowColor = bullet.hit ? "#fff29a" : bullet.color;
     ctx.shadowBlur = 18;
-    const speed = Math.hypot(bullet.vx, bullet.vy) || 1;
     ctx.lineWidth = Math.max(4, bullet.radius || 5);
     ctx.beginPath();
-    ctx.moveTo(bullet.x - bullet.vx / speed * 25, bullet.y - bullet.vy / speed * 25);
-    ctx.lineTo(bullet.x, bullet.y);
+    if (Number.isFinite(bullet.x1) && Number.isFinite(bullet.x2)) {
+      ctx.moveTo(bullet.x1, bullet.y1);
+      ctx.lineTo(bullet.x2, bullet.y2);
+    } else {
+      const speed = Math.hypot(bullet.vx, bullet.vy) || 1;
+      ctx.moveTo(bullet.x - bullet.vx / speed * 25, bullet.y - bullet.vy / speed * 25);
+      ctx.lineTo(bullet.x, bullet.y);
+    }
     ctx.stroke();
-    ctx.beginPath(); ctx.arc(bullet.x, bullet.y, bullet.radius || 5, 0, Math.PI * 2); ctx.fill();
+    const endX = bullet.x2 ?? bullet.x;
+    const endY = bullet.y2 ?? bullet.y;
+    ctx.beginPath(); ctx.arc(endX, endY, bullet.hit ? 8 : (bullet.radius || 5), 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
 
