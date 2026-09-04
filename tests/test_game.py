@@ -12,6 +12,7 @@ from server.game import (
     clear_position,
     movement_vector,
     normalize,
+    ray_rect_distance,
 )
 
 
@@ -25,6 +26,31 @@ def make_player(player_id: str = "p1") -> Player:
 
 
 class GameRulesTests(unittest.TestCase):
+    def test_ray_rectangle_intersection(self) -> None:
+        rect = {"x": 100, "y": 40, "w": 20, "h": 80}
+        self.assertEqual(ray_rect_distance(0, 80, 1, 0, rect, 500), 100)
+        self.assertIsNone(ray_rect_distance(0, 10, 1, 0, rect, 500))
+
+    def test_hitscan_shot_hits_player_and_stops_at_wall(self) -> None:
+        room = Room("TEST")
+        shooter = make_player("shooter")
+        target = make_player("target")
+        room.players = {shooter.id: shooter, target.id: target}
+        shooter.x, shooter.y = 50, 350
+        target.x, target.y = 130, 350
+        shooter.aim_x, shooter.aim_y = 1, 0
+        room._fire(shooter, time.monotonic())
+        self.assertLess(target.health, 100)
+        self.assertEqual(len(room.bullets), 1)
+        self.assertGreater(room.bullets[0].x2, room.bullets[0].x1)
+
+        target.health = 100
+        shooter.last_shot = 0
+        shooter.x, shooter.y = 200, 350
+        target.x, target.y = 400, 350
+        room._fire(shooter, time.monotonic())
+        self.assertEqual(target.health, 100)
+
     def test_normalize_caps_vector(self) -> None:
         x, y = normalize(3, 4)
         self.assertEqual(round(x, 2), 0.6)

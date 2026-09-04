@@ -8,7 +8,8 @@
   const roomCode = $("roomCode");
   const entryError = $("entryError");
   const canvas = $("arena");
-  const ctx = canvas.getContext("2d", { alpha: false });
+  const renderer3D = window.NeonRenderer3D?.create(canvas) || null;
+  const ctx = renderer3D ? null : canvas.getContext("2d", { alpha: false });
   const minimap = $("minimap");
   const mapCtx = minimap.getContext("2d");
   const healthFill = $("healthFill");
@@ -52,7 +53,7 @@
   const isAndroidApp = location.protocol === "file:";
   const httpOrigin = isAndroidApp ? "https://game.chanelchat.ir" : location.origin;
   const wsOrigin = isAndroidApp ? "wss://game.chanelchat.ir" : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
-  const protocolVersion = "4";
+  const protocolVersion = "5";
   if (isAndroidApp) $("downloadAndroid")?.classList.add("hidden");
 
   const app = {
@@ -230,7 +231,7 @@
       const oldIds = new Set(previous.bullets.map((bullet) => bullet.id));
       for (const bullet of state.bullets) {
         if (!oldIds.has(bullet.id)) {
-          app.effects.push({ type: "muzzle", born: performance.now(), x: bullet.x, y: bullet.y, color: bullet.color });
+          app.effects.push({ type: "muzzle", born: performance.now(), x: bullet.x1 ?? bullet.x, y: bullet.y1 ?? bullet.y, color: bullet.color });
           if (bullet.owner === app.playerId) acknowledgePredictedBullet(bullet);
           else playShot(false);
         }
@@ -349,7 +350,10 @@
     lookX = event.clientX;
     lookY = event.clientY;
     lookSurface.setPointerCapture(event.pointerId);
-    if (event.pointerType === "mouse") lookSurface.requestPointerLock?.();
+    if (event.pointerType === "mouse") {
+      lookSurface.requestPointerLock?.();
+      if (event.button === 0) { app.shooting = true; ensureAudio(); }
+    }
   });
   lookSurface.addEventListener("pointermove", (event) => {
     if (event.pointerId !== lookPointer && document.pointerLockElement !== lookSurface) return;
@@ -367,6 +371,7 @@
     if (event.pointerId !== lookPointer) return;
     lookPointer = null;
     app.lookVelocity = [0, 0];
+    if (event.pointerType === "mouse" && event.button === 0) app.shooting = false;
   };
   lookSurface.addEventListener("pointerup", endLook);
   lookSurface.addEventListener("pointercancel", endLook);
@@ -479,12 +484,13 @@
       const angle = baseAngle + spread;
       const dx = Math.cos(angle);
       const dy = Math.sin(angle);
+      const end = traceEnd(rendered.x + dx * 31, rendered.y + dy * 31, dx, dy, 820);
       app.localBullets.push({
         id: `local-${now}-${spread}`,
-        x: rendered.x + dx * 31,
-        y: rendered.y + dy * 31,
-        vx: dx * spec.speed,
-        vy: dy * spec.speed,
+        x1: rendered.x + dx * 31,
+        y1: rendered.y + dy * 31,
+        x2: end[0],
+        y2: end[1],
         radius: spec.radius,
         color: me.color,
         born: now,
@@ -494,27 +500,27 @@
     playShot(true);
   }
 
+  function traceEnd(x, y, dx, dy, range) {
+    let distance = 0;
+    while (distance < range) {
+      distance += 8;
+      const px = x + dx * distance, py = y + dy * distance;
+      if (px <= 0 || py <= 0 || px >= app.arena.width || py >= app.arena.height || wallAt(px, py) >= 0) return [px, py];
+    }
+    return [x + dx * range, y + dy * range];
+  }
+
   function acknowledgePredictedBullet(serverBullet) {
-    const serverAngle = Math.atan2(serverBullet.vy, serverBullet.vx);
+    const serverAngle = Math.atan2((serverBullet.y2 ?? serverBullet.y) - (serverBullet.y1 ?? 0), (serverBullet.x2 ?? serverBullet.x) - (serverBullet.x1 ?? 0));
     const index = app.localBullets.findIndex((bullet) => {
-      const angle = Math.atan2(bullet.vy, bullet.vx);
+      const angle = Math.atan2(bullet.y2 - bullet.y1, bullet.x2 - bullet.x1);
       return Math.abs(Math.atan2(Math.sin(angle - serverAngle), Math.cos(angle - serverAngle))) < .24;
     });
     if (index >= 0) app.localBullets.splice(index, 1);
   }
 
   function updatePredictedBullets(dt, now) {
-    app.localBullets = app.localBullets.filter((bullet) => {
-      bullet.x += bullet.vx * dt;
-      bullet.y += bullet.vy * dt;
-      if (now - bullet.born > 650) return false;
-      if (bullet.x < 0 || bullet.x > app.arena.width || bullet.y < 0 || bullet.y > app.arena.height) return false;
-      return !app.arena.obstacles.some((rect) => {
-        const nx = Math.max(rect.x, Math.min(bullet.x, rect.x + rect.w));
-        const ny = Math.max(rect.y, Math.min(bullet.y, rect.y + rect.h));
-        return (bullet.x - nx) ** 2 + (bullet.y - ny) ** 2 < bullet.radius ** 2;
-      });
-    });
+    app.localBullets = app.localBullets.filter((bullet) => now - bullet.born < 115);
   }
 
   function toggleSound() {
@@ -653,8 +659,23 @@
     const now = performance.now();
     const dt = Math.min((now - app.lastFrame) / 1000, .05);
     app.lastFrame = now;
-    drawBackground(now);
+    if (!renderer3D) drawBackground(now);
     if (!app.state) return;
+    if (renderer3D) {
+      predictShot(now);
+      updatePredictedBullets(dt, now);
+      const activeIds = new Set();
+      const players = app.state.players.map((player) => { activeIds.add(player.id); return smoothPlayer(player, dt); });
+      for (const id of app.renderPlayers.keys()) if (!activeIds.has(id)) app.renderPlayers.delete(id);
+      const me = players.find((player) => player.id === app.playerId);
+      if (me) renderer3D.render({
+        arena: app.arena, me, players, powerups: app.state.powerups || [],
+        traces: [...app.state.bullets, ...app.localBullets], angle: app.cameraAngle,
+        pitch: app.cameraPitch, now, dt, shooting: app.shooting, move: app.move
+      });
+      drawMinimap();
+      return;
+    }
     drawFirstPerson(now, dt);
     drawMinimap();
     drawScreenEffects(now);

@@ -26,15 +26,15 @@ async def main() -> None:
     async with httpx.AsyncClient(base_url=BASE_HTTP, trust_env=False) as client:
         health = (await client.get("/health")).json()
         assert health["ok"] is True
-        assert health["version"] == "1.8.0"
-        assert health["protocol"] == "4"
+        assert health["version"] == "2.0.0"
+        assert health["protocol"] == "5"
         response = await client.post("/api/rooms")
         response.raise_for_status()
         code = response.json()["code"]
 
     async with (
-        websockets.connect(f"{BASE_WS}/ws/{code}?name=One&protocol=4&client=android", proxy=None) as first,
-        websockets.connect(f"{BASE_WS}/ws/{code}?name=Two&protocol=4&client=web", proxy=None) as second,
+        websockets.connect(f"{BASE_WS}/ws/{code}?name=One&protocol=5&client=android", proxy=None) as first,
+        websockets.connect(f"{BASE_WS}/ws/{code}?name=Two&protocol=5&client=web", proxy=None) as second,
     ):
         welcome_one = await receive_type(first, "welcome")
         welcome_two = await receive_type(second, "welcome")

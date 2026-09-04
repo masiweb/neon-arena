@@ -74,10 +74,10 @@ POWERUP_LABELS = {
 }
 
 WEAPON_SPECS: dict[str, dict[str, Any]] = {
-    "base": {"interval": 0.24, "damage": 25, "speed": 650.0, "radius": 6, "spread": [0.0]},
-    "heavy": {"interval": 0.42, "damage": 45, "speed": 570.0, "radius": 9, "spread": [0.0]},
-    "rapid": {"interval": 0.12, "damage": 18, "speed": 760.0, "radius": 5, "spread": [0.0]},
-    "spread": {"interval": 0.36, "damage": 17, "speed": 640.0, "radius": 5, "spread": [-0.17, 0.0, 0.17]},
+    "base": {"interval": 0.22, "damage": 27, "range": 820.0, "spread": [0.0]},
+    "heavy": {"interval": 0.46, "damage": 48, "range": 900.0, "spread": [0.0]},
+    "rapid": {"interval": 0.105, "damage": 16, "range": 760.0, "spread": [-0.015, 0.015]},
+    "spread": {"interval": 0.39, "damage": 19, "range": 520.0, "spread": [-0.09, 0.0, 0.09]},
 }
 
 
@@ -106,6 +106,33 @@ def circle_hits_rect(x: float, y: float, radius: float, rect: dict[str, int]) ->
     nearest_x = clamp(x, rect["x"], rect["x"] + rect["w"])
     nearest_y = clamp(y, rect["y"], rect["y"] + rect["h"])
     return (x - nearest_x) ** 2 + (y - nearest_y) ** 2 < radius**2
+
+
+def ray_rect_distance(
+    origin_x: float,
+    origin_y: float,
+    direction_x: float,
+    direction_y: float,
+    rect: dict[str, int],
+    max_distance: float,
+) -> float | None:
+    """Return the first ray/rectangle intersection distance, if any."""
+    near, far = 0.0, max_distance
+    for origin, direction, low, high in (
+        (origin_x, direction_x, rect["x"], rect["x"] + rect["w"]),
+        (origin_y, direction_y, rect["y"], rect["y"] + rect["h"]),
+    ):
+        if abs(direction) < 1e-9:
+            if origin < low or origin > high:
+                return None
+            continue
+        first, second = (low - origin) / direction, (high - origin) / direction
+        if first > second:
+            first, second = second, first
+        near, far = max(near, first), min(far, second)
+        if near > far:
+            return None
+    return near if 0.0 <= near <= max_distance else None
 
 
 def clear_position(x: float, y: float, radius: float = PLAYER_RADIUS) -> bool:
@@ -203,25 +230,22 @@ class Player:
 class Bullet:
     id: str
     owner_id: str
-    x: float
-    y: float
-    vx: float
-    vy: float
+    x1: float
+    y1: float
+    x2: float
+    y2: float
     color: str
-    damage: int
-    radius: int
     expires_at: float
 
     def public(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "owner": self.owner_id,
-            "x": round(self.x, 1),
-            "y": round(self.y, 1),
-            "vx": round(self.vx, 1),
-            "vy": round(self.vy, 1),
+            "x1": round(self.x1, 1),
+            "y1": round(self.y1, 1),
+            "x2": round(self.x2, 1),
+            "y2": round(self.y2, 1),
             "color": self.color,
-            "radius": self.radius,
         }
 
 
@@ -526,50 +550,62 @@ class Room:
         for spread in spec["spread"]:
             angle = base_angle + spread
             dx, dy = math.cos(angle), math.sin(angle)
+            start_x, start_y = player.x + dx * 31, player.y + dy * 31
+            maximum = float(spec["range"])
+            wall_distance = maximum
+            for obstacle in OBSTACLES:
+                hit_distance = ray_rect_distance(start_x, start_y, dx, dy, obstacle, wall_distance)
+                if hit_distance is not None:
+                    wall_distance = hit_distance
+            boundary_distances = []
+            if dx > 1e-9:
+                boundary_distances.append((ARENA_WIDTH - start_x) / dx)
+            elif dx < -1e-9:
+                boundary_distances.append((0 - start_x) / dx)
+            if dy > 1e-9:
+                boundary_distances.append((ARENA_HEIGHT - start_y) / dy)
+            elif dy < -1e-9:
+                boundary_distances.append((0 - start_y) / dy)
+            wall_distance = min([wall_distance, *(value for value in boundary_distances if value >= 0)])
+
+            target: Player | None = None
+            target_distance = wall_distance
+            for candidate in self.players.values():
+                if candidate.id == player.id or not candidate.alive:
+                    continue
+                rel_x, rel_y = candidate.x - start_x, candidate.y - start_y
+                projection = rel_x * dx + rel_y * dy
+                if projection <= 0 or projection >= target_distance:
+                    continue
+                perpendicular_sq = rel_x * rel_x + rel_y * rel_y - projection * projection
+                if perpendicular_sq > PLAYER_RADIUS * PLAYER_RADIUS:
+                    continue
+                entry = projection - math.sqrt(max(0.0, PLAYER_RADIUS * PLAYER_RADIUS - perpendicular_sq))
+                if 0 <= entry < target_distance:
+                    target, target_distance = candidate, entry
+
+            end_distance = target_distance
             self.bullets.append(
                 Bullet(
                     secrets.token_hex(4),
                     player.id,
-                    player.x + dx * 31,
-                    player.y + dy * 31,
-                    dx * spec["speed"],
-                    dy * spec["speed"],
+                    start_x,
+                    start_y,
+                    start_x + dx * end_distance,
+                    start_y + dy * end_distance,
                     player.color,
-                    spec["damage"],
-                    spec["radius"],
-                    now + 1.8,
+                    now + 0.18,
                 )
             )
+            if target is not None:
+                damage = max(1, round(spec["damage"] * 0.25)) if target.shield_until > now else spec["damage"]
+                target.health = max(0, target.health - damage)
+                if target.health == 0:
+                    self._eliminate_life(target, player.id, now)
 
     def _update_bullets(self, dt: float, now: float) -> None:
-        remaining: list[Bullet] = []
-        for bullet in self.bullets:
-            bullet.x += bullet.vx * dt
-            bullet.y += bullet.vy * dt
-            if (
-                now >= bullet.expires_at
-                or bullet.x < 0
-                or bullet.x > ARENA_WIDTH
-                or bullet.y < 0
-                or bullet.y > ARENA_HEIGHT
-                or any(circle_hits_rect(bullet.x, bullet.y, bullet.radius, obstacle) for obstacle in OBSTACLES)
-            ):
-                continue
-
-            hit = False
-            for player in self.players.values():
-                if not player.alive or player.id == bullet.owner_id:
-                    continue
-                if math.hypot(player.x - bullet.x, player.y - bullet.y) <= PLAYER_RADIUS + bullet.radius:
-                    damage = max(1, round(bullet.damage * 0.25)) if player.shield_until > now else bullet.damage
-                    player.health = max(0, player.health - damage)
-                    if player.health == 0:
-                        self._eliminate_life(player, bullet.owner_id, now)
-                    hit = True
-                    break
-            if not hit:
-                remaining.append(bullet)
-        self.bullets = remaining
+        del dt
+        self.bullets = [bullet for bullet in self.bullets if bullet.expires_at > now]
 
     def _eliminate_life(self, player: Player, owner_id: str, now: float) -> None:
         player.lives = max(0, player.lives - 1)

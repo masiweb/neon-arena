@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>نبرد نئون</title>
-    <link rel="stylesheet" href="/static/styles.css?v=1.8.0" />
+    <link rel="stylesheet" href="/static/styles.css?v=2.0.0" />
   </head>
   <body>
     <div id="rotateNotice" class="rotate-notice" aria-live="polite">
@@ -42,7 +42,7 @@
           <button id="fullscreenEntry" class="fullscreen-entry" type="button">⛶ نمایش تمام‌صفحه</button>
           <a id="downloadAndroid" class="android-download" href="/static/neon-arena-android-latest.apk" download>
             <b>↓ دانلود آخرین نسخه اندروید</b>
-            <span>نسخه ۱.۸.۰ · مناسب Android 7 به بالا</span>
+            <span>نسخه ۲.۰.۰ · مناسب Android 7 به بالا</span>
           </a>
           <small>بدون نصب · سبک · مناسب ۲ تا ۱۲ نفر</small>
         </div>
@@ -51,6 +51,7 @@
       <section id="gameScreen" class="game-screen hidden" aria-label="میدان بازی">
         <canvas id="arena"></canvas>
         <div id="lookSurface" class="look-surface" aria-label="برای چرخاندن دوربین انگشت را بکشید"></div>
+        <div class="desktop-help">WASD حرکت · موس تغییر جهت · کلیک چپ شلیک · Shift شتاب · E سپر</div>
         <canvas id="minimap" aria-label="نقشه محیط و بازیکنان"></canvas>
         <div class="crosshair" aria-hidden="true"><i></i><i></i></div>
 
@@ -112,6 +113,7 @@
         </div>
       </section>
     </main>
-    <script src="/static/game.js?v=1.8.0" defer></script>
+    <script src="/static/renderer3d.js?v=2.0.0"></script>
+    <script src="/static/game.js?v=2.0.0" defer></script>
   </body>
 </html>

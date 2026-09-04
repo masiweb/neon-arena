@@ -10,8 +10,8 @@ android {
         applicationId "ir.chanelchat.neonarena"
         minSdk 24
         targetSdk 35
-        versionCode 180
-        versionName "1.8.0"
+        versionCode 200
+        versionName "2.0.0"
     }
 
     buildTypes {
@@ -33,13 +33,14 @@ android {
 
 tasks.register("syncGameAssets", Copy) {
     from("../../server/static") {
-        include "index.html", "styles.css", "game.js"
+        include "index.html", "styles.css", "game.js", "renderer3d.js"
     }
     into("src/main/assets")
     filter { String line ->
         line
-            .replace('href="/static/styles.css?v=1.8.0"', 'href="styles.css?v=1.8.0"')
-            .replace('src="/static/game.js?v=1.8.0"', 'src="game.js?v=1.8.0"')
+            .replace('href="/static/styles.css?v=2.0.0"', 'href="styles.css?v=2.0.0"')
+            .replace('src="/static/renderer3d.js?v=2.0.0"', 'src="renderer3d.js?v=2.0.0"')
+            .replace('src="/static/game.js?v=2.0.0"', 'src="game.js?v=2.0.0"')
     }
 }
 
