@@ -118,6 +118,7 @@ if [[ "${BUILD_ANDROID}" -eq 1 ]]; then
   fi
   APK_NAME="neon-arena-android-v${GAME_VERSION}.apk"
   install -m 0644 "${APK_SOURCE}" "${APP_DIR}/server/static/${APK_NAME}"
+  install -m 0644 "${APK_SOURCE}" "${APP_DIR}/server/static/neon-arena-android-latest.apk"
 fi
 
 sed "s|__APP_DIR__|${APP_DIR}|g" "${SCRIPT_DIR}/deploy/neon-arena.service" > "/etc/systemd/system/${SERVICE_NAME}.service"
