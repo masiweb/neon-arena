@@ -341,6 +341,7 @@
   }, () => { app.padMove = [0, 0]; });
   const lookSurface = $("lookSurface");
   const fireButton = $("fireButton");
+  let fireStopTimer = null;
   let lookPointer = null;
   let lookX = 0;
   let lookY = 0;
@@ -352,7 +353,7 @@
     lookSurface.setPointerCapture(event.pointerId);
     if (event.pointerType === "mouse") {
       lookSurface.requestPointerLock?.();
-      if (event.button === 0) { app.shooting = true; ensureAudio(); }
+      if (event.button === 0) beginShooting();
     }
   });
   lookSurface.addEventListener("pointermove", (event) => {
@@ -371,22 +372,30 @@
     if (event.pointerId !== lookPointer) return;
     lookPointer = null;
     app.lookVelocity = [0, 0];
-    if (event.pointerType === "mouse" && event.button === 0) app.shooting = false;
+    if (event.pointerType === "mouse" && event.button === 0) endShooting();
   };
   lookSurface.addEventListener("pointerup", endLook);
   lookSurface.addEventListener("pointercancel", endLook);
 
-  const startFire = (event) => {
-    event.preventDefault();
-    fireButton.setPointerCapture?.(event.pointerId);
+  function beginShooting() {
+    clearTimeout(fireStopTimer);
     app.shooting = true;
     fireButton.classList.add("active");
     ensureAudio();
+  }
+  function endShooting() {
+    clearTimeout(fireStopTimer);
+    fireStopTimer = setTimeout(() => {
+      app.shooting = false;
+      fireButton.classList.remove("active");
+    }, 70);
+  }
+  const startFire = (event) => {
+    event.preventDefault();
+    fireButton.setPointerCapture?.(event.pointerId);
+    beginShooting();
   };
-  const stopFire = () => {
-    app.shooting = false;
-    fireButton.classList.remove("active");
-  };
+  const stopFire = () => endShooting();
   fireButton.addEventListener("pointerdown", startFire);
   fireButton.addEventListener("pointerup", stopFire);
   fireButton.addEventListener("pointercancel", stopFire);
@@ -597,10 +606,11 @@
   });
   window.addEventListener("keyup", (event) => { app.keys.delete(event.key.toLowerCase()); if (event.key === " ") app.shooting = false; });
   window.addEventListener("pointerup", (event) => {
-    if (event.pointerType === "mouse" && event.button === 0 && document.pointerLockElement === lookSurface) app.shooting = false;
+    if (event.pointerType === "mouse" && event.button === 0 && document.pointerLockElement === lookSurface) endShooting();
   });
 
   function releaseInput() {
+    clearTimeout(fireStopTimer);
     app.padMove = [0, 0];
     app.move = [0, 0];
     app.shooting = false;
@@ -724,7 +734,7 @@
     predictShot(now); updatePredictedBullets(dt, now);
     const objects = [];
     for (const data of app.state.powerups || []) objects.push({ type: "powerup", x: data.x, y: data.y, data });
-    for (const data of [...app.state.bullets, ...app.localBullets]) objects.push({ type: "bullet", x: data.x, y: data.y, data });
+    for (const data of [...app.state.bullets, ...app.localBullets]) objects.push({ type: "bullet", x: data.x2 ?? data.x, y: data.y2 ?? data.y, data });
     for (const player of app.state.players) {
       if (player.id === app.playerId || (!player.alive && player.lives === 0)) continue;
       const data = smoothPlayer(player, dt); objects.push({ type: "player", x: data.x, y: data.y, data });
