@@ -9,6 +9,8 @@
   const entryError = $("entryError");
   const canvas = $("arena");
   const ctx = canvas.getContext("2d", { alpha: false });
+  const minimap = $("minimap");
+  const mapCtx = minimap.getContext("2d");
   const healthFill = $("healthFill");
   const healthText = $("healthText");
   const lives = $("lives");
@@ -37,6 +39,7 @@
     health: { color: "#ff4f6f", icon: "+", label: "خون" },
     shield: { color: "#20d9ff", icon: "◇", label: "سپر" },
     weapon: { color: "#ff2da6", icon: "✦", label: "سلاح" },
+    stealth: { color: "#a675ff", icon: "◉", label: "اختفا" },
   };
 
   const localWeaponSpecs = {
@@ -49,7 +52,7 @@
   const isAndroidApp = location.protocol === "file:";
   const httpOrigin = isAndroidApp ? "https://game.chanelchat.ir" : location.origin;
   const wsOrigin = isAndroidApp ? "wss://game.chanelchat.ir" : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
-  const protocolVersion = "3";
+  const protocolVersion = "4";
 
   const app = {
     socket: null,
@@ -202,7 +205,7 @@
     healthText.textContent = fa.format(me.health);
     lives.innerHTML = Array.from({ length: 3 }, (_, index) => `<i class="${index < me.lives ? "" : "lost"}">♥</i>`).join("");
     myScore.textContent = fa.format(me.score);
-    weaponBadge.textContent = `سلاح: ${weaponNames[me.weapon] || weaponNames.base}${me.speedBoost ? " · سرعت+" : ""}`;
+    weaponBadge.textContent = `سلاح: ${weaponNames[me.weapon] || weaponNames.base}${me.speedBoost ? " · سرعت+" : ""}${me.radarHidden ? " · اختفا" : ""}`;
 
     if (me.health < app.previousHealth) {
       navigator.vibrate?.(35);
@@ -532,10 +535,9 @@
   window.addEventListener("keyup", (event) => { app.keys.delete(event.key.toLowerCase()); if (event.key === " ") app.shooting = false; });
   canvas.addEventListener("pointermove", (event) => {
     if (event.pointerType !== "mouse" || !app.state) return;
-    const me = app.state.players.find((player) => player.id === app.playerId);
-    if (!me) return;
-    const point = screenToWorld(event.clientX, event.clientY);
-    app.aim = [point.x - me.x, point.y - me.y];
+    const angle = Math.atan2(event.clientY - innerHeight / 2, event.clientX - innerWidth / 2);
+    app.aim = [Math.cos(angle), Math.sin(angle)];
+    app.manualAim = true;
   });
   canvas.addEventListener("pointerdown", (event) => { if (event.pointerType === "mouse") app.shooting = true; });
   window.addEventListener("pointerup", (event) => { if (event.pointerType === "mouse") app.shooting = false; });
@@ -555,8 +557,12 @@
   setInterval(() => {
     const x = (app.keys.has("d") || app.keys.has("arrowright") ? 1 : 0) - (app.keys.has("a") || app.keys.has("arrowleft") ? 1 : 0);
     const y = (app.keys.has("s") || app.keys.has("arrowdown") ? 1 : 0) - (app.keys.has("w") || app.keys.has("arrowup") ? 1 : 0);
-    app.move = x || y ? [x, y] : app.padMove;
     app.aim = resolvedAim();
+    const local = x || y ? [x, y] : app.padMove;
+    const heading = Math.atan2(app.aim[1], app.aim[0]);
+    const forward = -local[1];
+    const strafe = local[0];
+    app.move = [Math.cos(heading) * forward - Math.sin(heading) * strafe, Math.sin(heading) * forward + Math.cos(heading) * strafe];
     app.inputSeq += 1;
     send({ type: "input", seq: app.inputSeq, move: app.move, aim: app.aim, shooting: app.shooting });
   }, 33);
@@ -571,6 +577,9 @@
     canvas.height = Math.round(innerHeight * dpr);
     canvas.style.width = `${innerWidth}px`;
     canvas.style.height = `${innerHeight}px`;
+    const mapRect = minimap.getBoundingClientRect();
+    minimap.width = Math.max(1, Math.round(mapRect.width * dpr));
+    minimap.height = Math.max(1, Math.round(mapRect.height * dpr));
   }
   addEventListener("resize", fit);
   fit();
@@ -593,13 +602,107 @@
     app.lastFrame = now;
     drawBackground(now);
     if (!app.state) return;
-    const { scale, ox, oy } = transform();
-    ctx.save();
-    ctx.translate(ox, oy);
-    ctx.scale(scale, scale);
-    drawArena(now, dt);
-    ctx.restore();
+    drawFirstPerson(now, dt);
+    drawMinimap();
     drawScreenEffects(now);
+  }
+
+  function projectPoint(x, y, camera) {
+    const dx = x - camera.me.x, dy = y - camera.me.y;
+    const cosine = Math.cos(camera.angle), sine = Math.sin(camera.angle);
+    const depth = dx * cosine + dy * sine;
+    const side = -dx * sine + dy * cosine;
+    const focal = canvas.width * .72;
+    if (depth < 16 || Math.abs(side / depth) > 1.35) return null;
+    return { x: canvas.width / 2 + side / depth * focal, depth, scale: focal / depth };
+  }
+
+  function groundY(view, horizon) {
+    return horizon + Math.min(canvas.height * .48, 25500 / Math.max(45, view.depth));
+  }
+
+  function drawFirstPerson(now, dt) {
+    const me = app.state.players.find((player) => player.id === app.playerId);
+    if (!me) return;
+    const camera = { me: smoothPlayer(me, dt), angle: Math.atan2(app.aim[1], app.aim[0]) };
+    const horizon = canvas.height * .46;
+    const floor = ctx.createLinearGradient(0, horizon, 0, canvas.height);
+    floor.addColorStop(0, "#101c2e"); floor.addColorStop(1, "#02050c");
+    ctx.fillStyle = floor; ctx.fillRect(0, horizon, canvas.width, canvas.height - horizon);
+    ctx.strokeStyle = "rgba(32,217,255,.12)"; ctx.lineWidth = 1;
+    for (let i = 1; i < 10; i++) { const y = horizon + (canvas.height - horizon) * (i / 10) ** .48; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+    for (let i = -8; i <= 8; i++) { ctx.beginPath(); ctx.moveTo(canvas.width / 2 + i * 20, horizon); ctx.lineTo(canvas.width / 2 + i * canvas.width * .16, canvas.height); ctx.stroke(); }
+
+    predictShot(now); updatePredictedBullets(dt, now);
+    const objects = [];
+    for (const rect of app.arena.obstacles) objects.push({ type: "wall", x: rect.x + rect.w / 2, y: rect.y + rect.h / 2, rect });
+    for (const data of app.state.powerups || []) objects.push({ type: "powerup", x: data.x, y: data.y, data });
+    for (const data of [...app.state.bullets, ...app.localBullets]) objects.push({ type: "bullet", x: data.x, y: data.y, data });
+    for (const player of app.state.players) {
+      if (player.id === app.playerId || (!player.alive && player.lives === 0)) continue;
+      const data = smoothPlayer(player, dt); objects.push({ type: "player", x: data.x, y: data.y, data });
+    }
+    for (const object of objects) object.view = projectPoint(object.x, object.y, camera);
+    objects.filter((object) => object.view).sort((a, b) => b.view.depth - a.view.depth).forEach((object) => {
+      if (object.type === "wall") drawPerspectiveWall(object, horizon);
+      else if (object.type === "player") drawNeonPerson(object, horizon);
+      else if (object.type === "powerup") drawPerspectivePowerup(object, horizon, now);
+      else drawPerspectiveBullet(object, horizon);
+    });
+    drawWeaponView(camera.me, now);
+  }
+
+  function drawPerspectiveWall(object, horizon) {
+    const { view, rect } = object;
+    const width = Math.min(canvas.width * .9, Math.max(rect.w, rect.h) * view.scale);
+    const height = Math.min(canvas.height * .72, 92 * view.scale), bottom = groundY(view, horizon);
+    ctx.save(); const gradient = ctx.createLinearGradient(view.x, bottom - height, view.x, bottom);
+    gradient.addColorStop(0, "#172b47"); gradient.addColorStop(1, "#07101f");
+    ctx.fillStyle = gradient; ctx.strokeStyle = "rgba(40,211,255,.7)"; ctx.lineWidth = Math.max(2, view.scale * 2);
+    ctx.fillRect(view.x - width / 2, bottom - height, width, height); ctx.strokeRect(view.x - width / 2, bottom - height, width, height);
+    ctx.strokeStyle = "rgba(255,45,166,.72)"; ctx.beginPath(); ctx.moveTo(view.x - width / 2, bottom); ctx.lineTo(view.x + width / 2, bottom); ctx.stroke(); ctx.restore();
+  }
+
+  function drawNeonPerson(object, horizon) {
+    const player = object.data, view = object.view, bottom = groundY(view, horizon);
+    const height = Math.max(28, Math.min(canvas.height * .7, 88 * view.scale)), head = height * .12, top = bottom - height;
+    ctx.save(); ctx.globalAlpha = player.alive ? 1 : .2; ctx.translate(view.x, top); ctx.strokeStyle = player.color; ctx.fillStyle = "#07101d";
+    ctx.shadowColor = player.color; ctx.shadowBlur = Math.min(24, height * .2); ctx.lineCap = "round"; ctx.lineWidth = Math.max(2, height * .045);
+    ctx.beginPath(); ctx.arc(0, head, head, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, head * 2); ctx.lineTo(0, height * .62); ctx.moveTo(0, height * .32); ctx.lineTo(-height * .23, height * .5); ctx.moveTo(0, height * .32); ctx.lineTo(height * .28, height * .43); ctx.moveTo(0, height * .62); ctx.lineTo(-height * .18, height); ctx.moveTo(0, height * .62); ctx.lineTo(height * .18, height); ctx.stroke();
+    if (player.shield) { ctx.strokeStyle = "#a8f7ff"; ctx.globalAlpha *= .7; ctx.beginPath(); ctx.ellipse(0, height * .52, height * .35, height * .56, 0, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1; ctx.font = `700 ${Math.max(12, Math.min(22, height * .15))}px Vazirmatn,sans-serif`; ctx.textAlign = "center"; ctx.fillStyle = "#edfdff"; ctx.fillText(player.name, 0, -8);
+    ctx.fillStyle = "rgba(1,5,12,.8)"; ctx.fillRect(-height * .28, height + 8, height * .56, 5); ctx.fillStyle = player.health < 35 ? "#ff4565" : player.color; ctx.fillRect(-height * .28, height + 8, height * .56 * Math.min(1, player.health / 100), 5); ctx.restore();
+  }
+
+  function drawPerspectivePowerup(object, horizon, now) {
+    const style = powerupStyle[object.data.kind] || powerupStyle.weapon, size = Math.max(18, Math.min(74, 28 * object.view.scale));
+    const y = groundY(object.view, horizon) - size * (1.05 + Math.sin(now * .006) * .08);
+    ctx.save(); ctx.translate(object.view.x, y); ctx.shadowColor = style.color; ctx.shadowBlur = 22; ctx.fillStyle = "rgba(3,9,19,.9)"; ctx.strokeStyle = style.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, size / 2, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.fillStyle = style.color; ctx.font = `900 ${size * .58}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(style.icon, 0, 1); ctx.restore();
+  }
+
+  function drawPerspectiveBullet(object, horizon) {
+    const size = Math.max(3, Math.min(18, (object.data.radius || 5) * object.view.scale));
+    ctx.save(); ctx.fillStyle = "#fff"; ctx.shadowColor = object.data.color; ctx.shadowBlur = 18; ctx.beginPath(); ctx.arc(object.view.x, groundY(object.view, horizon) - 34 * object.view.scale, size, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+  }
+
+  function drawWeaponView(me, now) {
+    const recoil = app.shooting ? Math.sin(now * .055) * 7 : 0, x = canvas.width * .62 + recoil, y = canvas.height + recoil;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(-.13); ctx.fillStyle = "#07111f"; ctx.strokeStyle = me.weapon === "heavy" ? "#ffd45e" : me.weapon === "rapid" ? "#9dff24" : me.weapon === "spread" ? "#ff64c2" : me.color; ctx.lineWidth = 5; ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 18; ctx.beginPath(); ctx.moveTo(-canvas.width * .12, 0); ctx.lineTo(-canvas.width * .09, -canvas.height * .18); ctx.lineTo(canvas.width * .1, -canvas.height * .24); ctx.lineTo(canvas.width * .17, -canvas.height * .13); ctx.lineTo(canvas.width * .13, 0); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+
+  function drawMinimap() {
+    const dpr = Math.min(devicePixelRatio || 1, 2), width = minimap.width, height = minimap.height, pad = 8 * dpr;
+    const sx = (width - pad * 2) / app.arena.width, sy = (height - pad * 2) / app.arena.height;
+    mapCtx.clearRect(0, 0, width, height); mapCtx.fillStyle = "rgba(2,8,18,.92)"; mapCtx.fillRect(0, 0, width, height); mapCtx.strokeStyle = "rgba(32,217,255,.24)"; mapCtx.lineWidth = dpr;
+    for (const rect of app.arena.obstacles) { mapCtx.fillStyle = "#17304a"; mapCtx.fillRect(pad + rect.x * sx, pad + rect.y * sy, rect.w * sx, rect.h * sy); mapCtx.strokeRect(pad + rect.x * sx, pad + rect.y * sy, rect.w * sx, rect.h * sy); }
+    for (const player of app.state.players) {
+      if (!player.alive || (player.radarHidden && player.id !== app.playerId)) continue;
+      const x = pad + player.x * sx, y = pad + player.y * sy;
+      mapCtx.fillStyle = player.id === app.playerId ? "#fff" : player.color; mapCtx.shadowColor = player.color; mapCtx.shadowBlur = 5 * dpr; mapCtx.beginPath(); mapCtx.arc(x, y, (player.id === app.playerId ? 4 : 3) * dpr, 0, Math.PI * 2); mapCtx.fill();
+      if (player.id === app.playerId) { const angle = Math.atan2(app.aim[1], app.aim[0]); mapCtx.strokeStyle = player.color; mapCtx.beginPath(); mapCtx.moveTo(x, y); mapCtx.lineTo(x + Math.cos(angle) * 13 * dpr, y + Math.sin(angle) * 13 * dpr); mapCtx.stroke(); }
+    }
+    mapCtx.shadowBlur = 0; mapCtx.strokeStyle = "rgba(32,217,255,.65)"; mapCtx.strokeRect(.5, .5, width - 1, height - 1);
   }
 
   function drawBackground(now) {
