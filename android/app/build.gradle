@@ -1,0 +1,46 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "ir.chanelchat.neonarena"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "ir.chanelchat.neonarena"
+        minSdk 24
+        targetSdk 35
+        versionCode 150
+        versionName "1.5.0"
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-test"
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+tasks.register("syncGameAssets", Copy) {
+    from("../../server/static") {
+        include "index.html", "styles.css", "game.js"
+    }
+    into("src/main/assets")
+    filter { String line ->
+        line
+            .replace('href="/static/styles.css?v=1.5.0"', 'href="styles.css?v=1.5.0"')
+            .replace('src="/static/game.js?v=1.5.0"', 'src="game.js?v=1.5.0"')
+    }
+}
+
+preBuild.dependsOn(syncGameAssets)

@@ -1,0 +1,21 @@
+[Unit]
+Description=Neon Arena multiplayer web game
+After=network.target
+
+[Service]
+Type=simple
+User=neonarena
+Group=neonarena
+WorkingDirectory=__APP_DIR__
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__APP_DIR__/venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 8765 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+

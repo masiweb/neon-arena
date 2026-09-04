@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#050815" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>نبرد نئون</title>
+    <link rel="stylesheet" href="/static/styles.css?v=1.5.0" />
+  </head>
+  <body>
+    <div id="rotateNotice" class="rotate-notice" aria-live="polite">
+      <div class="rotate-icon">↻</div>
+      <strong>گوشی را افقی کنید</strong>
+      <span>بازی در حالت افقی بهتر اجرا می‌شود</span>
+    </div>
+
+    <main id="app">
+      <section id="entryScreen" class="entry-screen">
+        <div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="entry-card">
+          <div class="eyebrow">بازی گروهی فوری</div>
+          <h1>نبرد <span>نئون</span></h1>
+          <p>اسم‌تان را وارد کنید، یک اتاق بسازید و لینک را برای دوستان بفرستید.</p>
+
+          <label class="field-label" for="playerName">نام بازیکن</label>
+          <input id="playerName" class="text-input" maxlength="18" autocomplete="nickname" placeholder="مثلاً مسیحا" />
+
+          <div class="entry-actions">
+            <button id="createRoom" class="button primary" type="button">
+              <span>ساخت اتاق جدید</span><b>＋</b>
+            </button>
+            <div class="divider"><span>یا</span></div>
+            <div class="join-row">
+              <input id="roomCode" class="text-input room-input" maxlength="4" inputmode="text" autocapitalize="characters" placeholder="کد اتاق" />
+              <button id="joinRoom" class="button secondary" type="button">ورود</button>
+            </div>
+          </div>
+          <div id="entryError" class="entry-error" role="alert"></div>
+          <button id="fullscreenEntry" class="fullscreen-entry" type="button">⛶ نمایش تمام‌صفحه</button>
+          <small>بدون نصب · سبک · مناسب ۲ تا ۱۲ نفر</small>
+        </div>
+      </section>
+
+      <section id="gameScreen" class="game-screen hidden" aria-label="میدان بازی">
+        <canvas id="arena"></canvas>
+
+        <header class="hud-top">
+          <div class="health-box hud-card">
+            <span id="lives" class="lives" aria-label="تعداد جان">♥♥♥</span>
+            <div class="health-track"><i id="healthFill"></i></div>
+            <b id="healthText">۱۰۰</b>
+          </div>
+          <div class="round-box hud-card">
+            <span id="phaseLabel">انتظار</span>
+            <strong id="timer">۰۲:۰۰</strong>
+          </div>
+          <button id="scoreToggle" class="score-button hud-card" type="button" aria-label="نمایش جدول امتیاز">
+            <span>رتبه</span><strong id="myScore">۰</strong>
+          </button>
+        </header>
+
+        <aside id="scoreboard" class="scoreboard hud-card" aria-label="جدول امتیاز">
+          <div class="score-head"><strong>جدول امتیاز</strong><button id="closeScore" type="button">×</button></div>
+          <ol id="scoreList"></ol>
+        </aside>
+
+        <div class="room-tools">
+          <button id="copyInvite" class="mini-button" type="button">دعوت دوستان</button>
+          <button id="fullscreen" class="mini-button icon-only" type="button" aria-label="تمام صفحه">⛶</button>
+          <button id="soundToggle" class="mini-button icon-only" type="button" aria-label="قطع و وصل صدا">♪</button>
+          <span id="roomBadge">اتاق: ----</span>
+          <span id="weaponBadge" class="weapon-badge">سلاح: معمولی</span>
+        </div>
+
+        <div id="centerMessage" class="center-message">
+          <strong>منتظر بازیکن‌ها</strong>
+          <span>لینک اتاق را برای دوستان بفرستید</span>
+          <button id="startRound" class="button primary hidden" type="button">شروع بازی</button>
+          <div id="botControls" class="bot-controls hidden" aria-label="مدیریت بازیکن‌های بات">
+            <button id="removeBot" type="button">− حذف بات</button>
+            <span id="botCount">۰ بات</span>
+            <button id="addBot" type="button">＋ افزودن بات</button>
+          </div>
+          <div id="weaponChooser" class="weapon-chooser hidden" aria-label="انتخاب سلاح جایزه">
+            <button type="button" data-weapon="heavy"><b>توپ سنگین</b><small>قدرت تخریب بالا</small></button>
+            <button type="button" data-weapon="rapid"><b>رگبار سریع</b><small>سرعت شلیک بالا</small></button>
+            <button type="button" data-weapon="spread"><b>سه‌تیر پخش‌شونده</b><small>پوشش بیشتر</small></button>
+          </div>
+        </div>
+
+        <div id="toast" class="toast" aria-live="polite"></div>
+
+        <div id="movePad" class="touch-pad move-pad" aria-label="کنترل حرکت">
+          <div class="pad-ring"><i class="pad-knob"></i></div>
+        </div>
+        <div class="right-controls">
+          <div class="ability-row">
+            <button id="shieldButton" class="ability shield" type="button" aria-label="سپر"><span>◇</span><i id="shieldCooldown"></i></button>
+            <button id="dashButton" class="ability dash" type="button" aria-label="شتاب"><span>»</span><i id="dashCooldown"></i></button>
+          </div>
+          <div id="aimPad" class="touch-pad aim-pad" aria-label="نشانه‌گیری و شلیک">
+            <div class="pad-ring fire-ring"><i class="pad-knob"></i><b>شلیک</b></div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="/static/game.js?v=1.5.0" defer></script>
+  </body>
+</html>
