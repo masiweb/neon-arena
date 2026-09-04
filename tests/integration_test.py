@@ -72,7 +72,7 @@ async def main() -> None:
         async with asyncio.timeout(6.0):
             while not powerup_state["powerups"]:
                 powerup_state = await receive_type(first, "state")
-        assert powerup_state["powerups"][0]["kind"] in {"speed", "health", "shield", "weapon"}
+        assert powerup_state["powerups"][0]["kind"] in {"speed", "health", "shield", "weapon", "stealth"}
 
     print("integration test: OK")
 
