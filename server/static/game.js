@@ -65,6 +65,9 @@
     move: [0, 0],
     padMove: [0, 0],
     aim: [1, 0],
+    cameraAngle: 0,
+    cameraPitch: 0,
+    lookInput: [0, 0],
     manualAim: false,
     shooting: false,
     inputSeq: 0,
@@ -337,9 +340,9 @@
   setupPad($("aimPad"), (x, y, distance) => {
     app.shooting = true;
     app.manualAim = distance > .2;
-    if (app.manualAim) app.aim = [x, y];
+    app.lookInput = app.manualAim ? [x, y] : [0, 0];
     ensureAudio();
-  }, () => { app.shooting = false; app.manualAim = false; });
+  }, () => { app.shooting = false; app.manualAim = false; app.lookInput = [0, 0]; });
 
   function automaticAim() {
     const me = app.state?.players.find((player) => player.id === app.playerId);
@@ -349,7 +352,9 @@
     for (const player of app.state.players) {
       if (player.id === me.id || !player.alive || player.lives <= 0) continue;
       const distance = Math.hypot(player.x - me.x, player.y - me.y);
-      if (distance < nearestDistance) {
+      const direction = Math.atan2(player.y - me.y, player.x - me.x);
+      const angleError = Math.abs(Math.atan2(Math.sin(direction - app.cameraAngle), Math.cos(direction - app.cameraAngle)));
+      if (distance < nearestDistance && angleError < .72) {
         nearest = player;
         nearestDistance = distance;
       }
@@ -358,11 +363,9 @@
   }
 
   function resolvedAim() {
-    if (app.manualAim) return app.aim;
-    const targetAim = automaticAim();
+    const targetAim = app.shooting ? automaticAim() : null;
     if (targetAim) return targetAim;
-    if (Math.hypot(app.move[0], app.move[1]) > .08) return app.move;
-    return app.aim;
+    return [Math.cos(app.cameraAngle), Math.sin(app.cameraAngle)];
   }
 
   function ensureAudio() {
@@ -536,8 +539,8 @@
   window.addEventListener("keyup", (event) => { app.keys.delete(event.key.toLowerCase()); if (event.key === " ") app.shooting = false; });
   canvas.addEventListener("pointermove", (event) => {
     if (event.pointerType !== "mouse" || !app.state) return;
-    const angle = Math.atan2(event.clientY - innerHeight / 2, event.clientX - innerWidth / 2);
-    app.aim = [Math.cos(angle), Math.sin(angle)];
+    app.cameraAngle += (event.movementX || 0) * .0035;
+    app.cameraPitch = Math.max(-.22, Math.min(.22, app.cameraPitch - (event.movementY || 0) * .002));
     app.manualAim = true;
   });
   canvas.addEventListener("pointerdown", (event) => { if (event.pointerType === "mouse") app.shooting = true; });
@@ -548,6 +551,7 @@
     app.move = [0, 0];
     app.shooting = false;
     app.manualAim = false;
+    app.lookInput = [0, 0];
     app.keys.clear();
     app.inputSeq += 1;
     send({ type: "input", seq: app.inputSeq, move: [0, 0], aim: app.aim, shooting: false });
@@ -558,9 +562,11 @@
   setInterval(() => {
     const x = (app.keys.has("d") || app.keys.has("arrowright") ? 1 : 0) - (app.keys.has("a") || app.keys.has("arrowleft") ? 1 : 0);
     const y = (app.keys.has("s") || app.keys.has("arrowdown") ? 1 : 0) - (app.keys.has("w") || app.keys.has("arrowup") ? 1 : 0);
+    app.cameraAngle += app.lookInput[0] * .085;
+    app.cameraPitch = Math.max(-.22, Math.min(.22, app.cameraPitch + app.lookInput[1] * .035));
     app.aim = resolvedAim();
     const local = x || y ? [x, y] : app.padMove;
-    const heading = Math.atan2(app.aim[1], app.aim[0]);
+    const heading = app.cameraAngle;
     const forward = -local[1];
     const strafe = local[0];
     app.move = [Math.cos(heading) * forward - Math.sin(heading) * strafe, Math.sin(heading) * forward + Math.cos(heading) * strafe];
@@ -613,8 +619,8 @@
     const cosine = Math.cos(camera.angle), sine = Math.sin(camera.angle);
     const depth = dx * cosine + dy * sine;
     const side = -dx * sine + dy * cosine;
-    const focal = canvas.width * .72;
-    if (depth < 16 || Math.abs(side / depth) > 1.35) return null;
+    const focal = canvas.width * .78;
+    if (depth < 16 || Math.abs(side / depth) > .72) return null;
     return { x: canvas.width / 2 + side / depth * focal, depth, scale: focal / depth };
   }
 
@@ -625,10 +631,19 @@
   function drawFirstPerson(now, dt) {
     const me = app.state.players.find((player) => player.id === app.playerId);
     if (!me) return;
-    const camera = { me: smoothPlayer(me, dt), angle: Math.atan2(app.aim[1], app.aim[0]) };
-    const horizon = canvas.height * .46;
+    const camera = { me: smoothPlayer(me, dt), angle: app.cameraAngle };
+    const horizon = canvas.height * (.47 + app.cameraPitch);
+    ctx.fillStyle = "#197cc2"; ctx.fillRect(0, 0, canvas.width, horizon);
+    ctx.fillStyle = "rgba(190,232,255,.7)";
+    const cloudShift = (app.cameraAngle * canvas.width * .12) % (canvas.width * 1.4);
+    for (let i = -1; i < 4; i++) {
+      const cx = i * canvas.width * .45 - cloudShift;
+      ctx.fillRect(cx, horizon * .22, canvas.width * .12, horizon * .14);
+      ctx.fillRect(cx + canvas.width * .06, horizon * .12, canvas.width * .09, horizon * .24);
+      ctx.fillRect(cx + canvas.width * .14, horizon * .25, canvas.width * .13, horizon * .11);
+    }
     const floor = ctx.createLinearGradient(0, horizon, 0, canvas.height);
-    floor.addColorStop(0, "#101c2e"); floor.addColorStop(1, "#02050c");
+    floor.addColorStop(0, "#43505e"); floor.addColorStop(1, "#111822");
     ctx.fillStyle = floor; ctx.fillRect(0, horizon, canvas.width, canvas.height - horizon);
     ctx.strokeStyle = "rgba(32,217,255,.12)"; ctx.lineWidth = 1;
     for (let i = 1; i < 10; i++) { const y = horizon + (canvas.height - horizon) * (i / 10) ** .48; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
@@ -636,21 +651,65 @@
 
     predictShot(now); updatePredictedBullets(dt, now);
     const objects = [];
-    for (const rect of app.arena.obstacles) objects.push({ type: "wall", x: rect.x + rect.w / 2, y: rect.y + rect.h / 2, rect });
     for (const data of app.state.powerups || []) objects.push({ type: "powerup", x: data.x, y: data.y, data });
     for (const data of [...app.state.bullets, ...app.localBullets]) objects.push({ type: "bullet", x: data.x, y: data.y, data });
     for (const player of app.state.players) {
       if (player.id === app.playerId || (!player.alive && player.lives === 0)) continue;
       const data = smoothPlayer(player, dt); objects.push({ type: "player", x: data.x, y: data.y, data });
     }
+    const depthBuffer = drawRaycastWalls(camera, horizon);
     for (const object of objects) object.view = projectPoint(object.x, object.y, camera);
     objects.filter((object) => object.view).sort((a, b) => b.view.depth - a.view.depth).forEach((object) => {
-      if (object.type === "wall") drawPerspectiveWall(object, horizon);
-      else if (object.type === "player") drawNeonPerson(object, horizon);
+      const ray = Math.max(0, Math.min(depthBuffer.length - 1, Math.floor(object.view.x / canvas.width * depthBuffer.length)));
+      if (object.view.depth > depthBuffer[ray] + 18) return;
+      if (object.type === "player") drawNeonPerson(object, horizon);
       else if (object.type === "powerup") drawPerspectivePowerup(object, horizon, now);
       else drawPerspectiveBullet(object, horizon);
     });
     drawWeaponView(camera.me, now);
+  }
+
+  function wallAt(x, y) {
+    if (x <= 2 || y <= 2 || x >= app.arena.width - 2 || y >= app.arena.height - 2) return -1;
+    return app.arena.obstacles.findIndex((rect) => x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h);
+  }
+
+  function drawRaycastWalls(camera, horizon) {
+    const fov = Math.PI * .42;
+    const rays = Math.max(140, Math.min(280, Math.floor(canvas.width / 4)));
+    const slice = canvas.width / rays;
+    const depths = new Array(rays).fill(1300);
+    for (let column = 0; column < rays; column++) {
+      const offset = (column / (rays - 1) - .5) * fov;
+      const angle = camera.angle + offset;
+      const dx = Math.cos(angle), dy = Math.sin(angle);
+      let distance = 12, hit = null, hitX = 0, hitY = 0;
+      while (distance < 1300) {
+        hitX = camera.me.x + dx * distance; hitY = camera.me.y + dy * distance;
+        const index = wallAt(hitX, hitY);
+        if (index !== null && index !== undefined && index !== -999 && (index >= 0 || hitX <= 2 || hitY <= 2 || hitX >= app.arena.width - 2 || hitY >= app.arena.height - 2)) { hit = index; break; }
+        distance += 7;
+      }
+      const corrected = distance * Math.cos(offset);
+      depths[column] = corrected;
+      const wallHeight = Math.min(canvas.height * 1.7, canvas.height * 155 / Math.max(35, corrected));
+      const top = horizon - wallHeight * .56, bottom = horizon + wallHeight * .44;
+      const shade = Math.max(.22, 1 - corrected / 1250);
+      const edge = hit < 0 ? 205 : 160 + (hit % 3) * 18;
+      ctx.fillStyle = `rgb(${Math.round(edge * shade)},${Math.round((edge + 12) * shade)},${Math.round((edge + 20) * shade)})`;
+      ctx.fillRect(column * slice, top, slice + 1, bottom - top);
+      const brickX = Math.floor((hitX + hitY) / 55);
+      if (column % Math.max(2, Math.floor(18 / slice)) === 0 || brickX % 7 === 0) {
+        ctx.fillStyle = `rgba(3,8,14,${.32 + (1 - shade) * .25})`;
+        ctx.fillRect(column * slice, top, Math.max(1, slice * .18), bottom - top);
+      }
+      const rows = Math.min(8, Math.max(2, Math.floor(wallHeight / 45)));
+      ctx.fillStyle = "rgba(3,8,14,.42)";
+      for (let row = 1; row < rows; row++) ctx.fillRect(column * slice, top + (bottom - top) * row / rows, slice + 1, Math.max(1, canvas.height / 420));
+      ctx.fillStyle = hit % 2 ? "rgba(255,45,166,.5)" : "rgba(32,217,255,.5)";
+      ctx.fillRect(column * slice, bottom - 2, slice + 1, 2);
+    }
+    return depths;
   }
 
   function drawPerspectiveWall(object, horizon) {
@@ -701,7 +760,7 @@
       if (!player.alive || (player.radarHidden && player.id !== app.playerId)) continue;
       const x = pad + player.x * sx, y = pad + player.y * sy;
       mapCtx.fillStyle = player.id === app.playerId ? "#fff" : player.color; mapCtx.shadowColor = player.color; mapCtx.shadowBlur = 5 * dpr; mapCtx.beginPath(); mapCtx.arc(x, y, (player.id === app.playerId ? 4 : 3) * dpr, 0, Math.PI * 2); mapCtx.fill();
-      if (player.id === app.playerId) { const angle = Math.atan2(app.aim[1], app.aim[0]); mapCtx.strokeStyle = player.color; mapCtx.beginPath(); mapCtx.moveTo(x, y); mapCtx.lineTo(x + Math.cos(angle) * 13 * dpr, y + Math.sin(angle) * 13 * dpr); mapCtx.stroke(); }
+      if (player.id === app.playerId) { const angle = app.cameraAngle; mapCtx.strokeStyle = player.color; mapCtx.beginPath(); mapCtx.moveTo(x, y); mapCtx.lineTo(x + Math.cos(angle) * 13 * dpr, y + Math.sin(angle) * 13 * dpr); mapCtx.stroke(); }
     }
     mapCtx.shadowBlur = 0; mapCtx.strokeStyle = "rgba(32,217,255,.65)"; mapCtx.strokeRect(.5, .5, width - 1, height - 1);
   }
