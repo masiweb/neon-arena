@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import urllib.request
 
-import httpx
 import websockets
 
 
@@ -22,15 +22,19 @@ async def receive_type(socket, wanted: str, timeout: float = 7.0) -> dict:
                 return payload
 
 
+def http_json(method: str, path: str) -> dict:
+    request = urllib.request.Request(f"{BASE_HTTP}{path}", method=method)
+    with urllib.request.urlopen(request, timeout=7) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 async def main() -> None:
-    async with httpx.AsyncClient(base_url=BASE_HTTP, trust_env=False) as client:
-        health = (await client.get("/health")).json()
-        assert health["ok"] is True
-        assert health["version"] == "2.0.0"
-        assert health["protocol"] == "5"
-        response = await client.post("/api/rooms")
-        response.raise_for_status()
-        code = response.json()["code"]
+    health = await asyncio.to_thread(http_json, "GET", "/health")
+    assert health["ok"] is True
+    assert health["version"] == "2.0.0"
+    assert health["protocol"] == "5"
+    room = await asyncio.to_thread(http_json, "POST", "/api/rooms")
+    code = room["code"]
 
     async with (
         websockets.connect(f"{BASE_WS}/ws/{code}?name=One&protocol=5&client=android", proxy=None) as first,
