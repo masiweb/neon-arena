@@ -31,10 +31,21 @@
 
 ## نصب سریع روی Ubuntu 24.04
 
-فایل ZIP را روی سرور از حالت فشرده خارج کنید و داخل پوشه پروژه اجرا کنید:
+روی Ubuntu 24.04 خام، مخزن را دریافت و نصب کامل را اجرا کنید:
 
 ```bash
+sudo apt-get update && sudo apt-get install -y git
+git clone https://github.com/masiweb/neon-arena.git
+cd neon-arena
 sudo bash install.sh --domain game.example.com --ssl
+```
+
+اسکریپت به‌صورت خودکار Python، Nginx، Java 17، Gradle 8.7، Android CLI، Android API 35 و Build Tools نسخه‌های 34 و 35 را نصب می‌کند؛ سپس سرور و APK نسخه 1.6.0 را آماده می‌کند.
+
+اگر روی یک سرور سبک فقط وب‌سرور را می‌خواهید و ساخت APK لازم نیست:
+
+```bash
+sudo bash install.sh --domain game.example.com --ssl --skip-android
 ```
 
 اگر فعلاً دامنه ندارید:
