@@ -53,6 +53,7 @@
   const httpOrigin = isAndroidApp ? "https://game.chanelchat.ir" : location.origin;
   const wsOrigin = isAndroidApp ? "wss://game.chanelchat.ir" : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
   const protocolVersion = "4";
+  if (isAndroidApp) $("downloadAndroid")?.classList.add("hidden");
 
   const app = {
     socket: null,
