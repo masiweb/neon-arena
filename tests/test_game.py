@@ -69,10 +69,13 @@ class GameRulesTests(unittest.TestCase):
         room._apply_powerup(player, "speed", now)
         room._apply_powerup(player, "shield", now)
         room._apply_powerup(player, "weapon", now)
+        room._apply_powerup(player, "stealth", now)
         self.assertEqual(player.health, 135)
         self.assertGreater(player.speed_until, now)
         self.assertGreater(player.shield_until, now)
         self.assertIn(player.weapon, {"heavy", "rapid", "spread"})
+        self.assertGreater(player.radar_hidden_until, now)
+        self.assertTrue(player.public(now)["radarHidden"])
 
     def test_winner_can_choose_next_round_weapon(self) -> None:
         room = Room("TEST")
