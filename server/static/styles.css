@@ -128,6 +128,12 @@ button { color: inherit; cursor: pointer; }
 @keyframes spin { to { transform: rotate(405deg); } }
 
 .game-screen { position: fixed; inset: 0; overflow: hidden; background: #030611; direction: ltr; }
+#minimap { position: fixed; z-index: 5; top: calc(var(--safe-top) + 64px); left: var(--safe-left); width: 168px; height: 98px; border: 1px solid rgba(32,217,255,.55); border-radius: 12px; background: rgba(2,8,18,.78); box-shadow: 0 0 24px rgba(32,217,255,.13), inset 0 0 18px rgba(5,25,42,.8); }
+.crosshair { position: fixed; z-index: 4; top: 50%; left: 50%; width: 34px; height: 34px; transform: translate(-50%,-50%); pointer-events: none; filter: drop-shadow(0 0 5px #20d9ff); }
+.crosshair i { position: absolute; display: block; background: rgba(218,251,255,.92); }
+.crosshair i:first-child { width: 2px; height: 34px; left: 16px; top: 0; }
+.crosshair i:last-child { width: 34px; height: 2px; left: 0; top: 16px; }
+.crosshair::after { content: ""; position: absolute; inset: 12px; border: 2px solid #20d9ff; border-radius: 50%; background: #07101c; }
 #arena { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .hud-card {
   border: 1px solid rgba(67, 217, 255, .38);
@@ -225,6 +231,7 @@ button { color: inherit; cursor: pointer; }
 }
 
 @media (max-height: 460px) {
+  #minimap { width: 138px; height: 80px; top: calc(var(--safe-top) + 52px); }
   .entry-screen { padding: 8px; }
   .entry-card { width: min(600px, 86vw); padding: 13px 23px 11px; }
   .entry-card h1 { font-size: 31px; }
