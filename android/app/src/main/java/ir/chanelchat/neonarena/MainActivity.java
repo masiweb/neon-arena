@@ -41,7 +41,7 @@ public final class MainActivity extends Activity {
         settings.setSupportZoom(false);
         settings.setTextZoom(100);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " NeonArenaAndroid/1.6.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " NeonArenaAndroid/1.7.0");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             settings.setSafeBrowsingEnabled(true);
         }
