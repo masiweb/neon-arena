@@ -7,11 +7,13 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -59,6 +61,16 @@ public final class MainActivity extends Activity {
                 super.onPageFinished(view, url);
                 hideSystemBars();
             }
+
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                ViewGroup parent = (ViewGroup) view.getParent();
+                if (parent != null) parent.removeView(view);
+                view.destroy();
+                gameView = null;
+                getWindow().getDecorView().post(MainActivity.this::recreate);
+                return true;
+            }
         });
 
         setContentView(gameView);
@@ -96,25 +108,25 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        gameView.onResume();
+        if (gameView != null) gameView.onResume();
         hideSystemBars();
     }
 
     @Override
     protected void onPause() {
-        gameView.onPause();
+        if (gameView != null) gameView.onPause();
         super.onPause();
     }
 
     @Override
     public void onBackPressed() {
-        if (gameView.canGoBack()) gameView.goBack();
+        if (gameView != null && gameView.canGoBack()) gameView.goBack();
         else super.onBackPressed();
     }
 
     @Override
     protected void onDestroy() {
-        gameView.destroy();
+        if (gameView != null) gameView.destroy();
         super.onDestroy();
     }
 }
