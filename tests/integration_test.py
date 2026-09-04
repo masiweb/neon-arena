@@ -26,7 +26,7 @@ async def main() -> None:
     async with httpx.AsyncClient(base_url=BASE_HTTP, trust_env=False) as client:
         health = (await client.get("/health")).json()
         assert health["ok"] is True
-        assert health["version"] == "1.6.0"
+        assert health["version"] == "1.7.0"
         assert health["protocol"] == "4"
         response = await client.post("/api/rooms")
         response.raise_for_status()
