@@ -139,6 +139,7 @@ button { color: inherit; cursor: pointer; }
 .crosshair i:last-child { width: 34px; height: 2px; left: 0; top: 16px; }
 .crosshair::after { content: ""; position: absolute; inset: 12px; border: 2px solid #20d9ff; border-radius: 50%; background: #07101c; }
 #arena { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.look-surface { position: fixed; z-index: 3; inset: 0 0 0 34%; touch-action: none; cursor: crosshair; }
 .hud-card {
   border: 1px solid rgba(67, 217, 255, .38);
   background: linear-gradient(145deg, rgba(8,24,46,.84), rgba(3,10,23,.78));
@@ -208,8 +209,7 @@ button { color: inherit; cursor: pointer; }
 
 .touch-pad { position: fixed; z-index: 6; width: 142px; height: 142px; display: grid; place-items: center; touch-action: none; }
 .move-pad { left: var(--safe-left); bottom: var(--safe-bottom); }
-.right-controls { position: fixed; z-index: 6; right: var(--safe-right); bottom: var(--safe-bottom); width: 162px; height: 182px; pointer-events: none; }
-.aim-pad { right: 0; bottom: 0; pointer-events: auto; }
+.right-controls { position: fixed; z-index: 6; right: var(--safe-right); bottom: var(--safe-bottom); width: 154px; height: 184px; pointer-events: none; }
 .pad-ring { position: relative; width: 116px; height: 116px; border: 2px solid rgba(59,219,255,.45); border-radius: 50%; background: radial-gradient(circle, rgba(32,217,255,.16), rgba(12,50,75,.09) 55%, rgba(4,12,25,.35)); box-shadow: 0 0 28px rgba(32,217,255,.09), inset 0 0 18px rgba(32,217,255,.08); }
 .pad-ring::before, .pad-ring::after { content: ""; position: absolute; background: rgba(32,217,255,.13); }
 .pad-ring::before { width: 2px; height: 66%; top: 17%; left: 50%; }
@@ -218,6 +218,10 @@ button { color: inherit; cursor: pointer; }
 .fire-ring { border-color: rgba(255,45,166,.48); background: radial-gradient(circle, rgba(255,45,166,.17), rgba(60,13,55,.08) 56%, rgba(4,12,25,.35)); }
 .fire-ring .pad-knob { border-color: rgba(255,167,220,.9); background: radial-gradient(circle at 35% 30%, rgba(255,167,220,.62), rgba(212,18,129,.58)); box-shadow: 0 0 20px rgba(255,45,166,.42); }
 .fire-ring b { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); color: rgba(255,255,255,.55); font-size: 8px; }
+.fire-button { position: absolute; right: 0; bottom: 0; width: 104px; height: 104px; border: 2px solid rgba(255,66,170,.72); border-radius: 50%; background: radial-gradient(circle at 38% 32%,rgba(255,120,200,.34),rgba(118,8,72,.52) 55%,rgba(7,10,24,.88)); box-shadow: 0 0 30px rgba(255,45,166,.28),inset 0 0 22px rgba(255,45,166,.18); color: #fff; pointer-events: auto; touch-action: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+.fire-button span { color: #ff60bc; font-size: 30px; line-height: .8; text-shadow: 0 0 16px #ff2da6; }
+.fire-button b { font-size: 10px; }
+.fire-button.active { transform: scale(.92); background: radial-gradient(circle,#ff70c4,#9a075c 58%,#170819); box-shadow: 0 0 42px rgba(255,45,166,.65); }
 .ability-row { position: absolute; top: 0; right: 8px; display: flex; gap: 9px; pointer-events: auto; }
 .ability { position: relative; width: 48px; height: 48px; overflow: hidden; border: 1px solid rgba(32,217,255,.45); border-radius: 50%; background: rgba(5,22,41,.78); color: var(--cyan); font-size: 24px; box-shadow: 0 0 14px rgba(32,217,255,.08); }
 .ability:active { transform: scale(.92); }

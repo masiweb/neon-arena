@@ -67,7 +67,8 @@
     aim: [1, 0],
     cameraAngle: 0,
     cameraPitch: 0,
-    lookInput: [0, 0],
+    lookVelocity: [0, 0],
+    moveVisual: 0,
     manualAim: false,
     shooting: false,
     inputSeq: 0,
@@ -337,12 +338,54 @@
     const directionLength = Math.hypot(x, y) || 1;
     app.padMove = [x / directionLength * strength, y / directionLength * strength];
   }, () => { app.padMove = [0, 0]; });
-  setupPad($("aimPad"), (x, y, distance) => {
+  const lookSurface = $("lookSurface");
+  const fireButton = $("fireButton");
+  let lookPointer = null;
+  let lookX = 0;
+  let lookY = 0;
+  lookSurface.addEventListener("pointerdown", (event) => {
+    if (lookPointer !== null) return;
+    lookPointer = event.pointerId;
+    lookX = event.clientX;
+    lookY = event.clientY;
+    lookSurface.setPointerCapture(event.pointerId);
+    if (event.pointerType === "mouse") lookSurface.requestPointerLock?.();
+  });
+  lookSurface.addEventListener("pointermove", (event) => {
+    if (event.pointerId !== lookPointer && document.pointerLockElement !== lookSurface) return;
+    const dx = document.pointerLockElement === lookSurface ? event.movementX : event.clientX - lookX;
+    const dy = document.pointerLockElement === lookSurface ? event.movementY : event.clientY - lookY;
+    lookX = event.clientX;
+    lookY = event.clientY;
+    const sensitivity = event.pointerType === "mouse" ? .0025 : .0042;
+    app.cameraAngle += Math.max(-55, Math.min(55, dx)) * sensitivity;
+    app.cameraPitch = Math.max(-.16, Math.min(.16, app.cameraPitch - Math.max(-45, Math.min(45, dy)) * sensitivity * .55));
+    app.lookVelocity = [dx * sensitivity, dy * sensitivity];
+    app.manualAim = true;
+  });
+  const endLook = (event) => {
+    if (event.pointerId !== lookPointer) return;
+    lookPointer = null;
+    app.lookVelocity = [0, 0];
+  };
+  lookSurface.addEventListener("pointerup", endLook);
+  lookSurface.addEventListener("pointercancel", endLook);
+
+  const startFire = (event) => {
+    event.preventDefault();
+    fireButton.setPointerCapture?.(event.pointerId);
     app.shooting = true;
-    app.manualAim = distance > .2;
-    app.lookInput = app.manualAim ? [x, y] : [0, 0];
+    fireButton.classList.add("active");
     ensureAudio();
-  }, () => { app.shooting = false; app.manualAim = false; app.lookInput = [0, 0]; });
+  };
+  const stopFire = () => {
+    app.shooting = false;
+    fireButton.classList.remove("active");
+  };
+  fireButton.addEventListener("pointerdown", startFire);
+  fireButton.addEventListener("pointerup", stopFire);
+  fireButton.addEventListener("pointercancel", stopFire);
+  fireButton.addEventListener("lostpointercapture", stopFire);
 
   function automaticAim() {
     const me = app.state?.players.find((player) => player.id === app.playerId);
@@ -354,12 +397,22 @@
       const distance = Math.hypot(player.x - me.x, player.y - me.y);
       const direction = Math.atan2(player.y - me.y, player.x - me.x);
       const angleError = Math.abs(Math.atan2(Math.sin(direction - app.cameraAngle), Math.cos(direction - app.cameraAngle)));
-      if (distance < nearestDistance && angleError < .72) {
+      if (distance < nearestDistance && angleError < .18 && hasLineOfSight(me.x, me.y, player.x, player.y)) {
         nearest = player;
         nearestDistance = distance;
       }
     }
     return nearest ? [nearest.x - me.x, nearest.y - me.y] : null;
+  }
+
+  function hasLineOfSight(x1, y1, x2, y2) {
+    const distance = Math.hypot(x2 - x1, y2 - y1);
+    const steps = Math.max(1, Math.ceil(distance / 18));
+    for (let step = 2; step < steps; step++) {
+      const ratio = step / steps;
+      if (wallAt(x1 + (x2 - x1) * ratio, y1 + (y2 - y1) * ratio) >= 0) return false;
+    }
+    return true;
   }
 
   function resolvedAim() {
@@ -537,21 +590,16 @@
     if (event.key.toLowerCase() === "shift") action("dash");
   });
   window.addEventListener("keyup", (event) => { app.keys.delete(event.key.toLowerCase()); if (event.key === " ") app.shooting = false; });
-  canvas.addEventListener("pointermove", (event) => {
-    if (event.pointerType !== "mouse" || !app.state) return;
-    app.cameraAngle += (event.movementX || 0) * .0035;
-    app.cameraPitch = Math.max(-.22, Math.min(.22, app.cameraPitch - (event.movementY || 0) * .002));
-    app.manualAim = true;
+  window.addEventListener("pointerup", (event) => {
+    if (event.pointerType === "mouse" && event.button === 0 && document.pointerLockElement === lookSurface) app.shooting = false;
   });
-  canvas.addEventListener("pointerdown", (event) => { if (event.pointerType === "mouse") app.shooting = true; });
-  window.addEventListener("pointerup", (event) => { if (event.pointerType === "mouse") app.shooting = false; });
 
   function releaseInput() {
     app.padMove = [0, 0];
     app.move = [0, 0];
     app.shooting = false;
     app.manualAim = false;
-    app.lookInput = [0, 0];
+    app.lookVelocity = [0, 0];
     app.keys.clear();
     app.inputSeq += 1;
     send({ type: "input", seq: app.inputSeq, move: [0, 0], aim: app.aim, shooting: false });
@@ -562,8 +610,6 @@
   setInterval(() => {
     const x = (app.keys.has("d") || app.keys.has("arrowright") ? 1 : 0) - (app.keys.has("a") || app.keys.has("arrowleft") ? 1 : 0);
     const y = (app.keys.has("s") || app.keys.has("arrowdown") ? 1 : 0) - (app.keys.has("w") || app.keys.has("arrowup") ? 1 : 0);
-    app.cameraAngle += app.lookInput[0] * .085;
-    app.cameraPitch = Math.max(-.22, Math.min(.22, app.cameraPitch + app.lookInput[1] * .035));
     app.aim = resolvedAim();
     const local = x || y ? [x, y] : app.padMove;
     const heading = app.cameraAngle;
@@ -632,8 +678,13 @@
     const me = app.state.players.find((player) => player.id === app.playerId);
     if (!me) return;
     const camera = { me: smoothPlayer(me, dt), angle: app.cameraAngle };
-    const horizon = canvas.height * (.47 + app.cameraPitch);
-    ctx.fillStyle = "#197cc2"; ctx.fillRect(0, 0, canvas.width, horizon);
+    const movement = Math.min(1, Math.hypot(app.move[0], app.move[1]));
+    app.moveVisual += (movement - app.moveVisual) * Math.min(1, dt * 10);
+    const bob = Math.sin(now * .011) * canvas.height * .006 * app.moveVisual;
+    const horizon = canvas.height * (.49 + app.cameraPitch) + bob;
+    const sky = ctx.createLinearGradient(0, 0, 0, horizon);
+    sky.addColorStop(0, "#0876bd"); sky.addColorStop(1, "#5bc6e8");
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, canvas.width, horizon);
     ctx.fillStyle = "rgba(190,232,255,.7)";
     const cloudShift = (app.cameraAngle * canvas.width * .12) % (canvas.width * 1.4);
     for (let i = -1; i < 4; i++) {
@@ -643,7 +694,7 @@
       ctx.fillRect(cx + canvas.width * .14, horizon * .25, canvas.width * .13, horizon * .11);
     }
     const floor = ctx.createLinearGradient(0, horizon, 0, canvas.height);
-    floor.addColorStop(0, "#43505e"); floor.addColorStop(1, "#111822");
+    floor.addColorStop(0, "#425160"); floor.addColorStop(.45, "#263440"); floor.addColorStop(1, "#0b1119");
     ctx.fillStyle = floor; ctx.fillRect(0, horizon, canvas.width, canvas.height - horizon);
     ctx.strokeStyle = "rgba(32,217,255,.12)"; ctx.lineWidth = 1;
     for (let i = 1; i < 10; i++) { const y = horizon + (canvas.height - horizon) * (i / 10) ** .48; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
@@ -666,7 +717,7 @@
       else if (object.type === "powerup") drawPerspectivePowerup(object, horizon, now);
       else drawPerspectiveBullet(object, horizon);
     });
-    drawWeaponView(camera.me, now);
+    drawWeaponView(camera.me, now, app.moveVisual, bob);
   }
 
   function wallAt(x, y) {
@@ -692,11 +743,14 @@
       }
       const corrected = distance * Math.cos(offset);
       depths[column] = corrected;
-      const wallHeight = Math.min(canvas.height * 1.7, canvas.height * 155 / Math.max(35, corrected));
-      const top = horizon - wallHeight * .56, bottom = horizon + wallHeight * .44;
+      const wallHeight = Math.min(canvas.height * 1.48, canvas.height * 132 / Math.max(40, corrected));
+      const top = horizon - wallHeight * .64, bottom = horizon + wallHeight * .36;
       const shade = Math.max(.22, 1 - corrected / 1250);
-      const edge = hit < 0 ? 205 : 160 + (hit % 3) * 18;
-      ctx.fillStyle = `rgb(${Math.round(edge * shade)},${Math.round((edge + 12) * shade)},${Math.round((edge + 20) * shade)})`;
+      const edge = hit < 0 ? 190 : 150 + (hit % 3) * 17;
+      const warm = hit >= 0 && hit % 4 === 0;
+      ctx.fillStyle = warm
+        ? `rgb(${Math.round((edge + 22) * shade)},${Math.round((edge + 15) * shade)},${Math.round(edge * shade)})`
+        : `rgb(${Math.round(edge * shade)},${Math.round((edge + 12) * shade)},${Math.round((edge + 20) * shade)})`;
       ctx.fillRect(column * slice, top, slice + 1, bottom - top);
       const brickX = Math.floor((hitX + hitY) / 55);
       if (column % Math.max(2, Math.floor(18 / slice)) === 0 || brickX % 7 === 0) {
@@ -729,7 +783,10 @@
     ctx.save(); ctx.globalAlpha = player.alive ? 1 : .2; ctx.translate(view.x, top); ctx.strokeStyle = player.color; ctx.fillStyle = "#07101d";
     ctx.shadowColor = player.color; ctx.shadowBlur = Math.min(24, height * .2); ctx.lineCap = "round"; ctx.lineWidth = Math.max(2, height * .045);
     ctx.beginPath(); ctx.arc(0, head, head, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, head * 2); ctx.lineTo(0, height * .62); ctx.moveTo(0, height * .32); ctx.lineTo(-height * .23, height * .5); ctx.moveTo(0, height * .32); ctx.lineTo(height * .28, height * .43); ctx.moveTo(0, height * .62); ctx.lineTo(-height * .18, height); ctx.moveTo(0, height * .62); ctx.lineTo(height * .18, height); ctx.stroke();
+    ctx.fillStyle = "rgba(4,10,18,.9)";
+    ctx.beginPath(); ctx.moveTo(-head * .9, head * 2.1); ctx.lineTo(-height * .12, height * .62); ctx.lineTo(height * .12, height * .62); ctx.lineTo(head * .9, head * 2.1); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-height * .08, height * .33); ctx.lineTo(-height * .25, height * .55); ctx.moveTo(height * .08, height * .33); ctx.lineTo(height * .29, height * .46); ctx.moveTo(-height * .08, height * .62); ctx.lineTo(-height * .18, height); ctx.moveTo(height * .08, height * .62); ctx.lineTo(height * .18, height); ctx.stroke();
+    ctx.lineWidth = Math.max(2, height * .035); ctx.beginPath(); ctx.moveTo(height * .2, height * .43); ctx.lineTo(height * .42, height * .38); ctx.stroke();
     if (player.shield) { ctx.strokeStyle = "#a8f7ff"; ctx.globalAlpha *= .7; ctx.beginPath(); ctx.ellipse(0, height * .52, height * .35, height * .56, 0, 0, Math.PI * 2); ctx.stroke(); }
     ctx.shadowBlur = 0; ctx.globalAlpha = 1; ctx.font = `700 ${Math.max(12, Math.min(22, height * .15))}px Vazirmatn,sans-serif`; ctx.textAlign = "center"; ctx.fillStyle = "#edfdff"; ctx.fillText(player.name, 0, -8);
     ctx.fillStyle = "rgba(1,5,12,.8)"; ctx.fillRect(-height * .28, height + 8, height * .56, 5); ctx.fillStyle = player.health < 35 ? "#ff4565" : player.color; ctx.fillRect(-height * .28, height + 8, height * .56 * Math.min(1, player.health / 100), 5); ctx.restore();
@@ -746,9 +803,19 @@
     ctx.save(); ctx.fillStyle = "#fff"; ctx.shadowColor = object.data.color; ctx.shadowBlur = 18; ctx.beginPath(); ctx.arc(object.view.x, groundY(object.view, horizon) - 34 * object.view.scale, size, 0, Math.PI * 2); ctx.fill(); ctx.restore();
   }
 
-  function drawWeaponView(me, now) {
-    const recoil = app.shooting ? Math.sin(now * .055) * 7 : 0, x = canvas.width * .62 + recoil, y = canvas.height + recoil;
-    ctx.save(); ctx.translate(x, y); ctx.rotate(-.13); ctx.fillStyle = "#07111f"; ctx.strokeStyle = me.weapon === "heavy" ? "#ffd45e" : me.weapon === "rapid" ? "#9dff24" : me.weapon === "spread" ? "#ff64c2" : me.color; ctx.lineWidth = 5; ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 18; ctx.beginPath(); ctx.moveTo(-canvas.width * .12, 0); ctx.lineTo(-canvas.width * .09, -canvas.height * .18); ctx.lineTo(canvas.width * .1, -canvas.height * .24); ctx.lineTo(canvas.width * .17, -canvas.height * .13); ctx.lineTo(canvas.width * .13, 0); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  function drawWeaponView(me, now, movement, bob) {
+    const recoil = app.shooting ? Math.max(0, Math.sin(now * .055)) * 12 : 0;
+    const swayX = Math.sin(now * .007) * 7 * movement;
+    const x = canvas.width * .73 + swayX + recoil, y = canvas.height + bob * .45 + recoil;
+    const accent = me.weapon === "heavy" ? "#ffd45e" : me.weapon === "rapid" ? "#9dff24" : me.weapon === "spread" ? "#ff64c2" : me.color;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(-.1); ctx.shadowColor = accent; ctx.shadowBlur = 15; ctx.lineJoin = "round";
+    ctx.fillStyle = "#17202a"; ctx.strokeStyle = "#03070c"; ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(-canvas.width * .13, 0); ctx.lineTo(-canvas.width * .1, -canvas.height * .17); ctx.lineTo(-canvas.width * .035, -canvas.height * .22); ctx.lineTo(canvas.width * .155, -canvas.height * .26); ctx.lineTo(canvas.width * .19, -canvas.height * .21); ctx.lineTo(canvas.width * .075, -canvas.height * .15); ctx.lineTo(canvas.width * .12, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#080d13"; ctx.fillRect(canvas.width * .01, -canvas.height * .18, canvas.width * .055, canvas.height * .16);
+    ctx.fillStyle = accent; ctx.fillRect(-canvas.width * .035, -canvas.height * .225, canvas.width * .19, 5);
+    ctx.strokeStyle = accent; ctx.lineWidth = 3; ctx.strokeRect(canvas.width * .045, -canvas.height * .285, canvas.width * .055, canvas.height * .055);
+    if (app.shooting) { ctx.fillStyle = "#fff6b0"; ctx.shadowColor = "#ff9d1f"; ctx.shadowBlur = 30; ctx.beginPath(); ctx.moveTo(canvas.width * .19,-canvas.height * .23); ctx.lineTo(canvas.width * .245,-canvas.height * .26); ctx.lineTo(canvas.width * .205,-canvas.height * .2); ctx.closePath(); ctx.fill(); }
+    ctx.restore();
   }
 
   function drawMinimap() {
