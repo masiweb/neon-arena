@@ -58,6 +58,7 @@ POWERUP_LABELS = {
     "health": "خون اضافه",
     "shield": "سپر دفاعی",
     "weapon": "سلاح قوی‌تر",
+    "stealth": "اختفای نقشه",
 }
 
 WEAPON_SPECS: dict[str, dict[str, Any]] = {
@@ -155,6 +156,7 @@ class Player:
     base_weapon: str = "base"
     weapon: str = "base"
     weapon_until: float = 0.0
+    radar_hidden_until: float = 0.0
     reward_weapon: str | None = None
     is_bot: bool = False
     bot_dash_at: float = 0.0
@@ -177,6 +179,7 @@ class Player:
             "speedBoost": self.speed_until > now,
             "dashing": self.dash_until > now,
             "weapon": self.weapon,
+            "radarHidden": self.radar_hidden_until > now,
             "bot": self.is_bot,
             "ack": self.last_input_seq,
             "dashCooldown": round(max(0.0, self.dash_ready_at - now), 1),
@@ -388,6 +391,7 @@ class Room:
             member.base_weapon = member.reward_weapon or "base"
             member.weapon = member.base_weapon
             member.weapon_until = 0.0
+            member.radar_hidden_until = 0.0
             member.reward_weapon = None
             member.x, member.y = spawn_point(list(self.players.values()))
         self.winner_id = None
@@ -601,6 +605,8 @@ class Room:
         elif kind == "weapon":
             player.weapon = random.choice(["heavy", "rapid", "spread"])
             player.weapon_until = now + 12.0
+        elif kind == "stealth":
+            player.radar_hidden_until = max(player.radar_hidden_until, now + 10.0)
 
     def _check_round_end(self, now: float) -> None:
         contenders = [player for player in self.players.values() if player.lives > 0]
