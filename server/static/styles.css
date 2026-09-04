@@ -121,6 +121,10 @@ button { color: inherit; cursor: pointer; }
   font-size: 11px;
 }
 .fullscreen-entry:hover { color: var(--cyan); }
+.android-download { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 50px; margin-top: 7px; border: 1px solid rgba(157,255,36,.38); border-radius: 12px; background: linear-gradient(135deg,rgba(35,89,20,.48),rgba(5,24,28,.72)); color: #dfffc0; text-decoration: none; box-shadow: 0 0 22px rgba(157,255,36,.08); }
+.android-download:active { transform: scale(.98); }
+.android-download b { font-size: 13px; }
+.android-download span { color: #91ba82; font-size: 9px; }
 .brand-mark { position: absolute; width: min(75vw, 760px); height: min(75vw, 760px); opacity: .15; }
 .brand-mark i { position: absolute; inset: 0; border: 2px solid var(--cyan); border-radius: 40%; transform: rotate(45deg); }
 .brand-mark i:nth-child(2) { inset: 12%; border-color: var(--pink); animation: spin 28s linear infinite reverse; }
@@ -240,6 +244,7 @@ button { color: inherit; cursor: pointer; }
   .entry-actions { margin-top: 7px; }
   .divider { height: 20px; }
   .entry-card small { margin-top: 5px; }
+  .android-download { min-height: 40px; margin-top: 4px; }
   .touch-pad { width: 126px; height: 126px; }
   .pad-ring { width: 104px; height: 104px; }
   .right-controls { width: 146px; height: 166px; }
