@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>نبرد نئون</title>
-    <link rel="stylesheet" href="/static/styles.css?v=1.5.0" />
+    <link rel="stylesheet" href="/static/styles.css?v=1.6.0" />
   </head>
   <body>
     <div id="rotateNotice" class="rotate-notice" aria-live="polite">
@@ -46,6 +46,8 @@
 
       <section id="gameScreen" class="game-screen hidden" aria-label="میدان بازی">
         <canvas id="arena"></canvas>
+        <canvas id="minimap" aria-label="نقشه محیط و بازیکنان"></canvas>
+        <div class="crosshair" aria-hidden="true"><i></i><i></i></div>
 
         <header class="hud-top">
           <div class="health-box hud-card">
@@ -107,6 +109,6 @@
         </div>
       </section>
     </main>
-    <script src="/static/game.js?v=1.5.0" defer></script>
+    <script src="/static/game.js?v=1.6.0" defer></script>
   </body>
 </html>
