@@ -18,8 +18,8 @@ ROOM_RE = re.compile(r"^[A-HJ-NP-Z2-9]{4}$")
 
 app = FastAPI(title="Neon Arena", docs_url=None, redoc_url=None)
 hub = GameHub()
-GAME_VERSION = "1.5.0"
-PROTOCOL_VERSION = "3"
+GAME_VERSION = "1.6.0"
+PROTOCOL_VERSION = "4"
 
 app.add_middleware(
     CORSMiddleware,
