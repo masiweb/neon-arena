@@ -3,10 +3,13 @@
 
   const $ = (id) => document.getElementById(id);
   const entryScreen = $("entryScreen");
+  const lobbyScreen = $("lobbyScreen");
   const gameScreen = $("gameScreen");
-  const playerName = $("playerName");
   const roomCode = $("roomCode");
   const entryError = $("entryError");
+  const lobbyError = $("lobbyError");
+  const panelModal = $("panelModal");
+  const panelBody = $("panelBody");
   let canvas = $("arena");
   let renderer3D = null;
   try {
@@ -46,6 +49,8 @@
   const toast = $("toast");
   const crosshair = document.querySelector(".crosshair");
   const damageFlash = $("damageFlash");
+  const grenadeButton = $("grenadeButton");
+  const rpgButton = $("rpgButton");
 
   const weaponNames = {
     base: "معمولی",
@@ -60,6 +65,8 @@
     shield: { color: "#20d9ff", icon: "◇", label: "سپر" },
     weapon: { color: "#ff2da6", icon: "✦", label: "سلاح" },
     stealth: { color: "#a675ff", icon: "◉", label: "اختفا" },
+    grenade: { color: "#ffc14f", icon: "●", label: "۳ نارنجک" },
+    rpg: { color: "#ff654f", icon: "➤", label: "۳ موشک RPG" },
   };
 
   const localWeaponSpecs = {
@@ -78,12 +85,21 @@
   const wsOrigin = isAndroidApp
     ? androidServerOrigin.replace(/^https:/, "wss:")
     : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
-  const protocolVersion = "7";
-  if (isAndroidApp) $("downloadAndroid")?.classList.add("hidden");
+  const protocolVersion = "8";
+  if (isAndroidApp) {
+    $("downloadAndroid")?.classList.add("hidden");
+    $("downloadAndroidLobby")?.classList.add("hidden");
+  }
 
   const app = {
+    token: localStorage.getItem("neon-token") || "",
+    user: null,
+    inviteUrl: "",
     socket: null,
     playerId: null,
+    accountId: null,
+    teamId: null,
+    ownerUserId: null,
     room: null,
     hostId: null,
     maps: [],
@@ -118,46 +134,172 @@
     musicTimer: null,
     musicStep: 0,
     audioMuted: localStorage.getItem("neon-muted") === "1",
+    voiceStream: null,
+    voicePeers: new Map(),
+    voiceEnabled: false,
+    iceServers: [],
   };
 
   const fa = new Intl.NumberFormat("fa-IR");
-  const queryRoom = new URLSearchParams(location.search).get("room");
-  playerName.value = localStorage.getItem("neon-name") || "";
+  const query = new URLSearchParams(location.search);
+  const queryRoom = query.get("room");
+  const queryReferral = query.get("ref");
+  const queryTeam = query.get("team");
+  const resetToken = new URLSearchParams(location.hash.replace(/^#/, "")).get("reset");
   if (queryRoom) roomCode.value = queryRoom.toUpperCase().slice(0, 4);
+  if (queryReferral) $("referralCode").value = queryReferral.toUpperCase().slice(0, 20);
 
   function showError(message) {
-    entryError.textContent = message;
+    const target = lobbyScreen.classList.contains("hidden") ? entryError : lobbyError;
+    target.textContent = message || "";
   }
 
   function notify(message) {
+    if (gameScreen.classList.contains("hidden")) {
+      const target = lobbyScreen.classList.contains("hidden") ? entryError : lobbyError;
+      target.textContent = message;
+      clearTimeout(notify.portalTimer);
+      notify.portalTimer = setTimeout(() => { if (target.textContent === message) target.textContent = ""; }, 3000);
+      return;
+    }
     toast.textContent = message;
     toast.classList.add("show");
     clearTimeout(notify.timer);
     notify.timer = setTimeout(() => toast.classList.remove("show"), 1900);
   }
 
-  function normalizedName() {
-    const name = playerName.value.trim().replace(/\s+/g, " ").slice(0, 18);
-    if (!name) {
-      showError("اول نام بازیکن را وارد کنید");
-      playerName.focus();
-      return null;
+  async function api(path, options = {}, authenticated = true) {
+    const headers = { ...(options.headers || {}) };
+    if (authenticated && app.token) headers.Authorization = `Bearer ${app.token}`;
+    let body = options.body;
+    if (body && typeof body !== "string") {
+      headers["Content-Type"] = "application/json";
+      body = JSON.stringify(body);
     }
-    localStorage.setItem("neon-name", name);
-    return name;
+    const response = await fetch(`${httpOrigin}${path}`, { ...options, headers, body });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (response.status === 401 && authenticated) clearSession(true);
+      throw new Error(data.detail || data.message || "درخواست انجام نشد");
+    }
+    return data;
+  }
+
+  function showAuthView(name) {
+    for (const form of document.querySelectorAll(".auth-form")) form.classList.add("hidden");
+    const selected = $(`${name}Form`);
+    selected?.classList.remove("hidden");
+    $("authTabs").classList.toggle("hidden", !["login", "register"].includes(name));
+    for (const button of document.querySelectorAll("[data-auth-view]")) button.classList.toggle("active", button.dataset.authView === name);
+    entryError.textContent = "";
+  }
+
+  function setSession(data) {
+    app.token = data.token;
+    localStorage.setItem("neon-token", app.token);
+    enterLobby(data.user, data.inviteUrl || "");
+    if (queryTeam && !data.user.team) {
+      api("/api/teams/join", { method:"POST", body:{ inviteCode:queryTeam } })
+        .then(() => refreshProfile()).then(() => notify("به تیم دعوت‌شده پیوستی"))
+        .catch((error) => showError(error.message));
+    }
+  }
+
+  function clearSession(showLogin = true) {
+    app.token = "";
+    app.user = null;
+    localStorage.removeItem("neon-token");
+    closeVoice();
+    lobbyScreen.classList.add("hidden");
+    gameScreen.classList.add("hidden");
+    document.body.classList.remove("in-game");
+    if (showLogin) {
+      entryScreen.classList.remove("hidden");
+      showAuthView("login");
+    }
+  }
+
+  function enterLobby(user, inviteUrl = "") {
+    app.user = user;
+    app.teamId = user.team?.id || null;
+    app.inviteUrl = inviteUrl || `${httpOrigin}/?ref=${user.referralCode}`;
+    $("profileUsername").textContent = user.username;
+    $("profileRank").textContent = user.rank?.name || "تازه‌کار";
+    $("goldBalance").textContent = fa.format(user.gold || 0);
+    $("diamondBalance").textContent = fa.format(user.diamonds || 0);
+    $("careerXp").textContent = `${fa.format(user.xp || 0)} XP`;
+    $("careerRating").textContent = fa.format(user.rating || 1000);
+    $("careerWins").textContent = fa.format(user.wins || 0);
+    $("careerKills").textContent = fa.format(user.kills || 0);
+    $("personalInvite").value = app.inviteUrl;
+    $("adminLink").classList.toggle("hidden", !user.isAdmin);
+    $("adminLink").href = `${httpOrigin}/admin`;
+    $("voiceMode").value = user.team ? "team" : "room";
+    $("voiceMode").querySelector('option[value="team"]').disabled = !user.team;
+    entryScreen.classList.add("hidden");
+    gameScreen.classList.add("hidden");
+    lobbyScreen.classList.remove("hidden");
+    document.body.classList.remove("in-game");
+    loadAds("lobby");
+  }
+
+  async function refreshProfile() {
+    if (!app.token) return;
+    const data = await api("/api/me");
+    enterLobby(data.user, data.inviteUrl);
+  }
+
+  async function bootstrap() {
+    if (resetToken) {
+      entryScreen.classList.remove("hidden");
+      showAuthView("reset");
+      return;
+    }
+    loadAds("login");
+    if (!app.token) return showAuthView("login");
+    try {
+      const data = await api("/api/me");
+      enterLobby(data.user, data.inviteUrl);
+      if (queryTeam && !data.user.team) {
+        try { await api("/api/teams/join", { method: "POST", body: { inviteCode: queryTeam } }); await refreshProfile(); notify("به تیم دعوت‌شده پیوستی"); }
+        catch (error) { showError(error.message); }
+      }
+    } catch {
+      clearSession(true);
+    }
+  }
+
+  async function loadAds(placement) {
+    try {
+      const data = await api(`/api/ads?placement=${encodeURIComponent(placement)}`, {}, false);
+      const slot = placement === "login" ? $("loginAd") : placement === "result" ? $("resultAd") : $("lobbyAd");
+      const ad = data.ads?.[0];
+      if (!slot || !ad) return;
+      const content = document.createElement(ad.targetUrl ? "a" : "div");
+      if (ad.targetUrl) { content.href = ad.targetUrl; content.target = "_blank"; content.rel = "noopener"; }
+      content.innerHTML = `<b></b><span></span>`;
+      content.querySelector("b").textContent = ad.title;
+      content.querySelector("span").textContent = ad.body;
+      if (ad.imageUrl) {
+        const picture = document.createElement("img");
+        picture.src = ad.imageUrl;
+        picture.alt = ad.title;
+        picture.loading = "lazy";
+        content.prepend(picture);
+      }
+      slot.replaceChildren(content);
+      slot.classList.remove("hidden");
+    } catch { /* Ads never block login or play. */ }
   }
 
   async function createRoom() {
-    const name = normalizedName();
-    if (!name) return;
     requestFullscreenSoft();
     ensureAudio();
     setBusy(true);
     try {
-      const response = await fetch(`${httpOrigin}/api/rooms`, { method: "POST" });
-      if (!response.ok) throw new Error("ساخت اتاق ممکن نشد");
-      const data = await response.json();
-      connect(data.code, name);
+      const data = await api("/api/rooms", { method: "POST" });
+      if (data.reused) notify("اتاق فعال قبلی‌ات باز شد");
+      connect(data.code);
     } catch (error) {
       showError(error.message || "ارتباط با سرور برقرار نشد");
       setBusy(false);
@@ -165,8 +307,6 @@
   }
 
   async function joinRoom() {
-    const name = normalizedName();
-    if (!name) return;
     const code = roomCode.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 4);
     roomCode.value = code;
     if (code.length !== 4) return showError("کد چهارحرفی اتاق را وارد کنید");
@@ -174,9 +314,8 @@
     ensureAudio();
     setBusy(true);
     try {
-      const check = await fetch(`${httpOrigin}/api/rooms/${code}`);
-      if (!check.ok) throw new Error("اتاق پیدا نشد؛ کد را بررسی کنید");
-      connect(code, name);
+      await api(`/api/rooms/${code}`, {}, false);
+      connect(code);
     } catch (error) {
       showError(error.message || "ارتباط با سرور برقرار نشد");
       setBusy(false);
@@ -186,22 +325,30 @@
   function setBusy(busy) {
     $("createRoom").disabled = busy;
     $("joinRoom").disabled = busy;
-    entryError.textContent = busy ? "در حال اتصال…" : "";
+    lobbyError.textContent = busy ? "در حال اتصال…" : "";
   }
 
-  function connect(code, name) {
+  function connect(code) {
     if (app.socket) app.socket.close();
-    const socket = new WebSocket(`${wsOrigin}/ws/${code}?name=${encodeURIComponent(name)}&protocol=${protocolVersion}&client=${isAndroidApp ? "android" : "web"}`);
+    const socket = new WebSocket(`${wsOrigin}/ws/${code}?protocol=${protocolVersion}&client=${isAndroidApp ? "android" : "web"}`);
     app.socket = socket;
-    socket.addEventListener("open", () => setBusy(false));
+    app.playerId = null;
+    socket.addEventListener("open", () => {
+      socket.send(JSON.stringify({ type: "auth", token: app.token }));
+      setBusy(false);
+    });
     socket.addEventListener("message", (event) => onMessage(JSON.parse(event.data)));
     socket.addEventListener("close", () => {
       if (!app.playerId) {
         showError("اتصال به اتاق ممکن نشد");
         setBusy(false);
       } else {
-        notify("ارتباط قطع شد؛ در حال اتصال مجدد…");
-        setTimeout(() => location.reload(), 1800);
+        notify("ارتباط با اتاق قطع شد");
+        closeVoice();
+        app.playerId = null;
+        app.room = null;
+        document.body.classList.remove("in-game");
+        setTimeout(() => refreshProfile().catch(() => clearSession(true)), 700);
       }
     });
     socket.addEventListener("error", () => showError("خطا در ارتباط با سرور"));
@@ -212,6 +359,10 @@
       app.playerId = message.playerId;
       app.room = message.room;
       app.hostId = message.hostId;
+      app.accountId = message.accountId;
+      app.teamId = message.teamId;
+      app.ownerUserId = message.ownerUserId;
+      app.iceServers = message.iceServers || [];
       app.maps = message.maps || [];
       app.botDifficulties = message.botDifficulties || [];
       applyArena(message.arena);
@@ -219,7 +370,9 @@
       roomBadge.textContent = `اتاق: ${message.room}`;
       history.replaceState(null, "", `?room=${message.room}`);
       entryScreen.classList.add("hidden");
+      lobbyScreen.classList.add("hidden");
       gameScreen.classList.remove("hidden");
+      document.body.classList.add("in-game");
       requestAnimationFrame(fit);
       requestFullscreenSoft();
       return;
@@ -237,9 +390,15 @@
       return;
     }
     if (message.type === "event") notify(message.message);
+    if (message.type === "voice_peers") handleVoicePeers(message.peers || []);
+    if (message.type === "voice_signal") handleVoiceSignal(message.from, message.signal).catch(() => notify("اتصال صوتی یکی از کاربران برقرار نشد"));
+    if (message.type === "forced_leave") {
+      notify(message.message || "از اتاق خارج شدید");
+      app.socket?.close(1000);
+    }
     if (message.type === "error") {
-      app.playerId = null;
-      showError(message.message);
+      if (app.playerId) notify(message.message);
+      else showError(message.message);
     }
   }
 
@@ -280,6 +439,10 @@
     lives.innerHTML = Array.from({ length: 3 }, (_, index) => `<i class="${index < me.lives ? "" : "lost"}">♥</i>`).join("");
     myScore.textContent = fa.format(me.score);
     weaponBadge.textContent = `سلاح: ${weaponNames[me.weapon] || weaponNames.base}${me.speedBoost ? " · سرعت+" : ""}${me.radarHidden ? " · اختفا" : ""}`;
+    $("grenadeCount").textContent = fa.format(me.grenades || 0);
+    $("rpgCount").textContent = fa.format(me.rockets || 0);
+    grenadeButton.disabled = !me.alive || state.phase !== "playing" || !(me.grenades > 0);
+    rpgButton.disabled = !me.alive || state.phase !== "playing" || !(me.rockets > 0);
     mapBadge.textContent = `نقشه: ${state.mapName || app.arena.name || "نئون"}`;
 
     if (me.health < app.previousHealth) {
@@ -296,6 +459,8 @@
     const secs = (state.remaining % 60).toString().padStart(2, "0");
     timer.textContent = `${toFaDigits(mins)}:${toFaDigits(secs)}`;
     phaseLabel.textContent = state.phase === "playing" ? "راند فعال" : state.phase === "countdown" ? "آماده" : state.phase === "ended" ? "پایان راند" : "اتاق انتظار";
+    if (state.phase === "ended" && previous?.phase !== "ended") loadAds("result");
+    if (state.phase !== "ended") $("resultAd").classList.add("hidden");
     updateScores(state.players);
     updateCenterMessage();
     updateCooldown($("dashButton"), $("dashCooldown"), me.dashCooldown, 4);
@@ -319,6 +484,12 @@
         }
       }
     }
+    if (previous?.explosions) {
+      const oldExplosions = new Set(previous.explosions.map((item) => item.id));
+      for (const explosion of state.explosions || []) {
+        if (!oldExplosions.has(explosion.id)) playExplosion(explosion.kind);
+      }
+    }
   }
 
   function showHitConfirmation() {
@@ -337,7 +508,8 @@
       const item = document.createElement("li");
       if (player.id === app.playerId) item.className = "me";
       item.innerHTML = `<b>${toFaDigits(index + 1)}</b><i class="dot" style="background:${player.color};color:${player.color}"></i><span></span><em class="score-lives">♥ ${fa.format(player.lives)}</em><strong>${fa.format(player.score)}</strong>`;
-      item.querySelector("span").textContent = `${player.bot ? "🤖 " : ""}${player.name}`;
+      const teammate = app.teamId && player.teamId === app.teamId ? " ◈" : "";
+      item.querySelector("span").textContent = `${player.bot ? "🤖 " : ""}${player.name}${teammate}`;
       return item;
     }));
   }
@@ -346,6 +518,7 @@
     const state = app.state;
     const me = state.players.find((player) => player.id === app.playerId);
     startRound.classList.add("hidden");
+    $("resetRound").classList.add("hidden");
     botControls.classList.add("hidden");
     lobbySettings.classList.add("hidden");
     weaponChooser.classList.add("hidden");
@@ -360,6 +533,7 @@
       centerMessage.querySelector("span").textContent = state.winnerChoice ? `جایزه برنده: ${weaponNames[state.winnerChoice]}` : app.playerId === state.hostId ? "هر بازیکن سه جان دارد؛ وقتی همه آماده شدند شروع کنید" : "سازنده اتاق بازی را شروع می‌کند";
       if (app.playerId === state.hostId && (!state.winnerId || state.winnerChoice)) startRound.classList.remove("hidden");
       if (app.playerId === state.hostId) {
+        $("resetRound").classList.remove("hidden");
         const bots = state.players.filter((player) => player.bot).length;
         $("botCount").textContent = `${fa.format(bots)} بات`;
         $("removeBot").disabled = bots === 0;
@@ -375,6 +549,7 @@
     } else if (state.phase === "ended") {
       centerMessage.querySelector("strong").textContent = `${state.winner} برنده شد!`;
       centerMessage.querySelector("span").textContent = state.winnerChoice ? `سلاح ${weaponNames[state.winnerChoice]} برای برنده انتخاب شد` : "برنده در حال انتخاب سلاح جایزه است";
+      if (app.playerId === state.hostId) $("resetRound").classList.remove("hidden");
     } else if (state.phase === "playing" && me?.lives === 0) {
       centerMessage.querySelector("strong").textContent = "جان‌هایت تمام شد";
       centerMessage.querySelector("span").textContent = "تا پایان راند بازی را تماشا کن";
@@ -392,6 +567,11 @@
 
   function send(payload) {
     if (app.socket?.readyState === WebSocket.OPEN) app.socket.send(JSON.stringify(payload));
+  }
+
+  async function copyText(value, message = "کپی شد") {
+    try { await navigator.clipboard.writeText(value); notify(message); }
+    catch { prompt("این متن را کپی کنید:", value); }
   }
 
   function setupPad(element, onChange, onEnd) {
@@ -536,6 +716,7 @@
     const maximumDistance = coarsePointer ? 560 : 480;
     for (const player of app.state.players) {
       if (player.id === me.id || !player.alive || player.lives <= 0) continue;
+      if (me.teamId && player.teamId === me.teamId) continue;
       const distance = Math.hypot(player.x - me.x, player.y - me.y);
       const direction = Math.atan2(player.y - me.y, player.x - me.x);
       const delta = Math.atan2(Math.sin(direction - app.cameraAngle), Math.cos(direction - app.cameraAngle));
@@ -687,6 +868,14 @@
     tone(150, .12, .035, "triangle", 0, "effects", 310);
   }
 
+  function playExplosion(kind) {
+    ensureAudio();
+    const heavy = kind === "rpg";
+    tone(heavy ? 72 : 92, heavy ? .55 : .42, heavy ? .18 : .14, "sawtooth", 0, "effects", 28);
+    noiseBurst(heavy ? .48 : .36, heavy ? .2 : .15, heavy ? 980 : 1350);
+    navigator.vibrate?.(heavy ? [45, 35, 80] : [35, 25, 55]);
+  }
+
   function predictShot(now) {
     if (!app.shooting || app.state?.phase !== "playing") return;
     const me = app.state.players.find((player) => player.id === app.playerId);
@@ -784,17 +973,217 @@
     }
   }
 
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[char]);
+  }
+
+  function openPanel(title, eyebrow = "حساب کاربری") {
+    $("panelTitle").textContent = title;
+    $("panelEyebrow").textContent = eyebrow;
+    panelBody.innerHTML = '<div class="empty-state">در حال دریافت اطلاعات…</div>';
+    panelModal.classList.remove("hidden");
+  }
+
+  function closePanel() {
+    panelModal.classList.add("hidden");
+    panelBody.replaceChildren();
+  }
+
+  function userRow(user, actions = "") {
+    return `<div class="list-row"><div><b>${escapeHtml(user.username)}</b><small>${escapeHtml(user.rank?.name || "")} · ریتینگ ${fa.format(user.rating || 0)}</small></div><div class="row-actions">${actions}</div></div>`;
+  }
+
+  async function showFriends() {
+    openPanel("دوستان و درخواست‌ها", "شبکه مبارزان");
+    try {
+      const social = await api("/api/friends");
+      panelBody.innerHTML = `
+        <form id="friendSearchForm" class="panel-tools"><input id="friendSearch" class="text-input" maxlength="20" placeholder="نام کاربری را جست‌وجو کن" /><button class="button secondary" type="submit">جست‌وجو</button></form>
+        <div id="friendSearchResults" class="panel-list"></div>
+        <h3>درخواست‌های دریافتی</h3><div class="panel-list">${social.received.length ? social.received.map((user) => userRow(user, `<button data-friend-accept="${user.requestId}">قبول</button><button class="reject" data-friend-reject="${user.requestId}">رد</button>`)).join("") : '<div class="empty-state">درخواستی نداری</div>'}</div>
+        <h3>دوستان</h3><div class="panel-list">${social.friends.length ? social.friends.map((user) => userRow(user, `<button class="reject" data-block-user="${user.id}">مسدود</button>`)).join("") : '<div class="empty-state">هنوز دوستی اضافه نکرده‌ای</div>'}</div>
+        <h3>در انتظار پاسخ</h3><div class="panel-list">${social.sent.length ? social.sent.map((user) => userRow(user, '<small>ارسال شده</small>')).join("") : '<div class="empty-state">موردی نیست</div>'}</div>
+        <h3>مسدودشده‌ها</h3><div class="panel-list">${social.blocked.length ? social.blocked.map((user) => userRow(user, `<button data-unblock-user="${user.id}">رفع مسدودی</button>`)).join("") : '<div class="empty-state">موردی نیست</div>'}</div>`;
+      $("friendSearchForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const q = $("friendSearch").value.trim();
+        if (q.length < 2) return;
+        const result = await api(`/api/users/search?q=${encodeURIComponent(q)}`);
+        $("friendSearchResults").innerHTML = result.users.length
+          ? result.users.map((user) => userRow(user, `<button data-add-friend="${escapeHtml(user.username)}">افزودن</button><button class="reject" data-block-user="${user.id}">مسدود</button>`)).join("")
+          : '<div class="empty-state">کاربری پیدا نشد</div>';
+      });
+    } catch (error) { panelBody.innerHTML = `<div class="entry-error">${escapeHtml(error.message)}</div>`; }
+  }
+
+  async function showTeam() {
+    openPanel("تیم من", "گروه تا ۶ نفر");
+    try {
+      const data = await api("/api/teams/me");
+      if (data.team) {
+        const team = data.team;
+        panelBody.innerHTML = `<div class="economy-note"><b>${escapeHtml(team.name)}</b><br>اعضا ${fa.format(team.members.length)} از ${fa.format(team.maxMembers)} · تیر، نارنجک و RPG هم‌تیمی‌ها روی یکدیگر اثر ندارد.</div>
+          <div class="copy-row"><input id="teamInviteLink" class="text-input" readonly dir="ltr" value="${escapeHtml(data.inviteUrl)}" /><button data-copy-team class="button secondary">کپی دعوت</button></div>
+          <h3>اعضای تیم</h3><div class="panel-list">${team.members.map((user) => userRow(user, user.id === team.ownerId ? '<small>فرمانده</small>' : "")).join("")}</div>
+          <button data-leave-team class="button danger wide" type="button">خروج از تیم</button>`;
+      } else {
+        panelBody.innerHTML = `<div class="economy-note">یک تیم بساز یا با کد دعوت به تیم دوستانت ملحق شو. ظرفیت هر تیم دقیقاً ۶ بازیکن است.</div>
+          <form id="createTeamForm" class="panel-tools"><input id="teamName" class="text-input" maxlength="24" placeholder="نام تیم" /><button class="button primary" type="submit">ساخت تیم</button></form>
+          <div class="divider"><span>یا</span></div>
+          <form id="joinTeamForm" class="panel-tools"><input id="teamInviteCode" class="text-input room-input" maxlength="8" placeholder="کد دعوت" /><button class="button secondary" type="submit">عضویت</button></form>`;
+        $("createTeamForm").addEventListener("submit", async (event) => { event.preventDefault(); await api("/api/teams", { method:"POST", body:{ name:$("teamName").value } }); await refreshProfile(); showTeam(); });
+        $("joinTeamForm").addEventListener("submit", async (event) => { event.preventDefault(); await api("/api/teams/join", { method:"POST", body:{ inviteCode:$("teamInviteCode").value } }); await refreshProfile(); showTeam(); });
+      }
+    } catch (error) { panelBody.innerHTML = `<div class="entry-error">${escapeHtml(error.message)}</div>`; }
+  }
+
+  async function showShop() {
+    openPanel("فروشگاه طلا و الماس", "اقتصاد بازی");
+    try {
+      const [products, orders, economy] = await Promise.all([api("/api/shop/products", {}, false), api("/api/shop/orders"), api("/api/economy/rules", {}, false)]);
+      const rule = economy.rules;
+      panelBody.innerHTML = `<div class="economy-note">روش دریافت رایگان: حضور در هر راند ${fa.format(rule.participation_gold)} طلا، هر حذف ${fa.format(rule.kill_gold)} طلا و ${fa.format(rule.kill_xp)} XP، برد ${fa.format(rule.winner_gold)} طلا و ${fa.format(rule.winner_diamonds)} الماس. جایزه فقط از نتیجه معتبر سرور پرداخت می‌شود.</div>
+        <div class="shop-grid">${products.products.map((item) => `<article class="product-card"><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description)}</p><strong>${fa.format(item.priceIrr)} ریال</strong><small>${item.grantGold ? `${fa.format(item.grantGold)} طلا` : ""} ${item.grantDiamonds ? `${fa.format(item.grantDiamonds)} الماس` : ""}</small><button class="button secondary" data-order-product="${item.id}">ثبت سفارش</button></article>`).join("")}</div>
+        <h3>سفارش‌های من</h3><div class="panel-list">${orders.orders.length ? orders.orders.map((item) => `<div class="list-row"><div><b>${escapeHtml(item.title)}</b><small>${fa.format(item.amountIrr)} ریال</small></div><span>${item.status === "paid" ? "تأییدشده" : item.status === "rejected" ? "ردشده" : "در انتظار تأیید"}</span></div>`).join("") : '<div class="empty-state">سفارشی ثبت نشده است</div>'}</div>`;
+    } catch (error) { panelBody.innerHTML = `<div class="entry-error">${escapeHtml(error.message)}</div>`; }
+  }
+
+  async function showRanking() {
+    openPanel("رده‌بندی مبارزان", "امتیاز و افتخارات");
+    try {
+      const data = await api("/api/leaderboard?limit=50", {}, false);
+      panelBody.innerHTML = `<table class="rank-table"><thead><tr><th>#</th><th>بازیکن</th><th>رده</th><th>ریتینگ</th><th>برد</th><th>حذف</th></tr></thead><tbody>${data.players.map((player) => `<tr class="${player.id === app.user?.id ? "me" : ""}"><td>${fa.format(player.position)}</td><td>${escapeHtml(player.username)}</td><td>${escapeHtml(player.rank.name)}</td><td>${fa.format(player.rating)}</td><td>${fa.format(player.wins)}</td><td>${fa.format(player.kills)}</td></tr>`).join("")}</tbody></table>`;
+    } catch (error) { panelBody.innerHTML = `<div class="entry-error">${escapeHtml(error.message)}</div>`; }
+  }
+
+  function createVoicePeer(peerId) {
+    let connection = app.voicePeers.get(peerId);
+    if (connection) return connection;
+    connection = new RTCPeerConnection({ iceServers: app.iceServers.length ? app.iceServers : [{ urls:"stun:stun.l.google.com:19302" }] });
+    connection.pendingCandidates = [];
+    for (const track of app.voiceStream?.getTracks() || []) connection.addTrack(track, app.voiceStream);
+    connection.onicecandidate = (event) => { if (event.candidate) send({ type:"voice_signal", target:peerId, signal:{ candidate:event.candidate } }); };
+    connection.ontrack = (event) => {
+      let audio = connection.remoteAudio;
+      if (!audio) { audio = document.createElement("audio"); audio.autoplay = true; audio.dataset.voicePeer = peerId; document.body.appendChild(audio); connection.remoteAudio = audio; }
+      audio.srcObject = event.streams[0];
+    };
+    connection.onconnectionstatechange = () => { if (["failed","closed"].includes(connection.connectionState)) removeVoicePeer(peerId); };
+    app.voicePeers.set(peerId, connection);
+    return connection;
+  }
+
+  function removeVoicePeer(peerId) {
+    const connection = app.voicePeers.get(peerId);
+    connection?.remoteAudio?.remove();
+    connection?.close();
+    app.voicePeers.delete(peerId);
+  }
+
+  async function handleVoicePeers(peers) {
+    if (!app.voiceEnabled) return;
+    const ids = new Set(peers.map((peer) => peer.id));
+    for (const id of app.voicePeers.keys()) if (!ids.has(id)) removeVoicePeer(id);
+    for (const peer of peers) {
+      const connection = createVoicePeer(peer.id);
+      if (app.playerId < peer.id && connection.signalingState === "stable") {
+        const offer = await connection.createOffer();
+        await connection.setLocalDescription(offer);
+        send({ type:"voice_signal", target:peer.id, signal:{ description:connection.localDescription } });
+      }
+    }
+  }
+
+  async function handleVoiceSignal(from, signal) {
+    if (!app.voiceEnabled || !from || !signal) return;
+    const connection = createVoicePeer(from);
+    if (signal.description) {
+      await connection.setRemoteDescription(signal.description);
+      for (const candidate of connection.pendingCandidates.splice(0)) await connection.addIceCandidate(candidate);
+      if (signal.description.type === "offer") {
+        const answer = await connection.createAnswer();
+        await connection.setLocalDescription(answer);
+        send({ type:"voice_signal", target:from, signal:{ description:connection.localDescription } });
+      }
+    } else if (signal.candidate) {
+      if (connection.remoteDescription) await connection.addIceCandidate(signal.candidate);
+      else connection.pendingCandidates.push(signal.candidate);
+    }
+  }
+
+  async function toggleVoice() {
+    if (app.voiceEnabled) return closeVoice();
+    try {
+      app.voiceStream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true }, video:false });
+      app.voiceEnabled = true;
+      $("voiceToggle").textContent = "🎙 صدای روشن";
+      $("voiceToggle").classList.add("active");
+      send({ type:"voice_join", mode:$("voiceMode").value });
+      notify("گفت‌وگوی صوتی فعال شد");
+    } catch { notify("اجازه میکروفون داده نشد"); }
+  }
+
+  function closeVoice() {
+    if (app.voiceEnabled) send({ type:"voice_leave" });
+    app.voiceEnabled = false;
+    app.voiceStream?.getTracks().forEach((track) => track.stop());
+    app.voiceStream = null;
+    for (const id of [...app.voicePeers.keys()]) removeVoicePeer(id);
+    $("voiceToggle").textContent = "🎙 صدای خاموش";
+    $("voiceToggle").classList.remove("active");
+  }
+
+  for (const button of document.querySelectorAll("[data-auth-view]")) button.addEventListener("click", () => showAuthView(button.dataset.authView));
+  $("showForgot").addEventListener("click", () => showAuthView("forgot"));
+  $("loginForm").addEventListener("submit", async (event) => {
+    event.preventDefault(); entryError.textContent = "در حال ورود…";
+    try { setSession(await api("/api/auth/login", { method:"POST", body:{ email:$("loginEmail").value, password:$("loginPassword").value } }, false)); }
+    catch (error) { entryError.textContent = error.message; }
+  });
+  $("registerForm").addEventListener("submit", async (event) => {
+    event.preventDefault(); entryError.textContent = "در حال ساخت حساب…";
+    try {
+      setSession(await api("/api/auth/register", { method:"POST", body:{ email:$("registerEmail").value, username:$("registerUsername").value, password:$("registerPassword").value, referralCode:$("referralCode").value } }, false));
+      notify("حساب ساخته شد؛ ۲۵۰ طلا هدیه گرفتی");
+    } catch (error) { entryError.textContent = error.message; }
+  });
+  $("forgotForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const data = await api("/api/auth/forgot", { method:"POST", body:{ email:$("forgotEmail").value } }, false);
+      entryError.textContent = data.delivery === "not_configured" ? "ایمیل سرور هنوز تنظیم نشده؛ با مدیر تماس بگیرید." : data.message;
+      if (data.debugResetUrl) entryError.textContent += ` ${data.debugResetUrl}`;
+    } catch (error) { entryError.textContent = error.message; }
+  });
+  $("resetForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try { await api("/api/auth/reset", { method:"POST", body:{ token:resetToken, password:$("resetPassword").value } }, false); history.replaceState(null,"",location.pathname); showAuthView("login"); entryError.textContent = "رمز تغییر کرد؛ حالا وارد شوید."; }
+    catch (error) { entryError.textContent = error.message; }
+  });
+  $("logoutButton").addEventListener("click", async () => { try { await api("/api/auth/logout", { method:"POST" }); } catch {} clearSession(true); });
+  $("copyPersonalInvite").addEventListener("click", () => copyText(app.inviteUrl, "لینک شخصی دعوت کپی شد"));
+  for (const button of document.querySelectorAll("[data-panel]")) button.addEventListener("click", () => ({ friends:showFriends, team:showTeam, shop:showShop, ranking:showRanking })[button.dataset.panel]?.());
+  $("closePanel").addEventListener("click", closePanel); $("panelBackdrop").addEventListener("click", closePanel);
+  panelBody.addEventListener("click", async (event) => {
+    const button = event.target.closest("button"); if (!button) return;
+    try {
+      if (button.dataset.addFriend) { await api("/api/friends/requests", { method:"POST", body:{ username:button.dataset.addFriend } }); notify("درخواست دوستی ارسال شد"); showFriends(); }
+      else if (button.dataset.friendAccept) { await api(`/api/friends/requests/${button.dataset.friendAccept}/accept`, { method:"POST" }); showFriends(); }
+      else if (button.dataset.friendReject) { await api(`/api/friends/requests/${button.dataset.friendReject}/reject`, { method:"POST" }); showFriends(); }
+      else if (button.dataset.blockUser) { await api(`/api/users/${button.dataset.blockUser}/block`, { method:"POST" }); showFriends(); }
+      else if (button.dataset.unblockUser) { await api(`/api/users/${button.dataset.unblockUser}/block`, { method:"DELETE" }); showFriends(); }
+      else if (button.hasAttribute("data-copy-team")) copyText($("teamInviteLink").value, "لینک تیم کپی شد");
+      else if (button.hasAttribute("data-leave-team")) { await api("/api/teams/leave", { method:"POST" }); await refreshProfile(); showTeam(); }
+      else if (button.dataset.orderProduct) { const data = await api("/api/shop/orders", { method:"POST", body:{ productId:Number(button.dataset.orderProduct) } }); notify(data.message); showShop(); }
+    } catch (error) { notify(error.message); }
+  });
+
   $("createRoom").addEventListener("click", createRoom);
   $("joinRoom").addEventListener("click", joinRoom);
   roomCode.addEventListener("input", () => { roomCode.value = roomCode.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 4); });
   roomCode.addEventListener("keydown", (event) => { if (event.key === "Enter") joinRoom(); });
-  playerName.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      if (queryRoom) joinRoom();
-      else createRoom();
-    }
-  });
   startRound.addEventListener("click", () => send({ type: "start" }));
+  $("resetRound").addEventListener("click", () => { if (confirm("مسابقه فعلی از اول شروع شود؟")) send({ type:"reset" }); });
   $("addBot").addEventListener("click", () => send({ type: "add_bot" }));
   $("removeBot").addEventListener("click", () => send({ type: "remove_bot" }));
   mapSelect.addEventListener("change", () => send({ type: "select_map", map: mapSelect.value }));
@@ -806,17 +1195,22 @@
   $("dashButton").addEventListener("pointerdown", () => action("dash"));
   $("shieldButton").addEventListener("pointerdown", () => action("shield"));
   jumpButton.addEventListener("pointerdown", () => action("jump"));
+  grenadeButton.addEventListener("pointerdown", () => action("grenade"));
+  rpgButton.addEventListener("pointerdown", () => action("rpg"));
+  $("voiceToggle").addEventListener("click", toggleVoice);
+  $("voiceMode").addEventListener("change", () => { if (app.voiceEnabled) { for (const id of [...app.voicePeers.keys()]) removeVoicePeer(id); send({ type:"voice_join", mode:$("voiceMode").value }); } });
+  $("leaveRoom").addEventListener("click", async () => { try { await api(`/api/rooms/${app.room}/leave`, { method:"POST" }); } catch {} app.socket?.close(1000); });
   $("fullscreen").addEventListener("click", toggleFullscreen);
   $("soundToggle").addEventListener("click", toggleSound);
   $("soundToggle").textContent = app.audioMuted ? "×♪" : "♪";
-  $("fullscreenEntry").addEventListener("click", requestFullscreenSoft);
   $("scoreToggle").addEventListener("click", () => scoreboard.classList.toggle("open"));
   $("closeScore").addEventListener("click", () => scoreboard.classList.remove("open"));
   $("copyInvite").addEventListener("click", async () => {
     const url = `${httpOrigin}/?room=${app.room}`;
-    try { await navigator.clipboard.writeText(url); notify("لینک دعوت کپی شد"); }
-    catch { prompt("این لینک را برای دوستان بفرستید:", url); }
+    copyText(url, "لینک دعوت اتاق کپی شد");
   });
+
+  bootstrap();
 
   window.addEventListener("keydown", (event) => {
     if ([" ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) event.preventDefault();
@@ -825,6 +1219,8 @@
     if (event.key === " ") action("jump");
     if (event.key.toLowerCase() === "e") action("shield");
     if (event.key.toLowerCase() === "shift") action("dash");
+    if (event.key.toLowerCase() === "g") action("grenade");
+    if (event.key.toLowerCase() === "r") action("rpg");
   });
   window.addEventListener("keyup", (event) => {
     app.keys.delete(event.key.toLowerCase());
@@ -915,6 +1311,7 @@
       const me = players.find((player) => player.id === app.playerId);
       if (me) renderer3D.render({
         arena: app.arena, me, players, powerups: app.state.powerups || [],
+        projectiles: app.state.projectiles || [], explosions: app.state.explosions || [],
         traces: [...app.state.bullets, ...app.localBullets], angle: app.cameraAngle,
         pitch: app.cameraPitch, now, dt, shooting: app.shooting, move: app.move,
         muzzle: now < app.muzzleUntil, recoil: app.weaponRecoil
@@ -970,6 +1367,8 @@
     predictShot(now); updatePredictedBullets(dt, now);
     const objects = [];
     for (const data of app.state.powerups || []) objects.push({ type: "powerup", x: data.x, y: data.y, data });
+    for (const data of app.state.projectiles || []) objects.push({ type: "projectile", x: data.x, y: data.y, data });
+    for (const data of app.state.explosions || []) objects.push({ type: "explosion", x: data.x, y: data.y, data });
     for (const data of [...app.state.bullets, ...app.localBullets]) objects.push({ type: "bullet", x: data.x2 ?? data.x, y: data.y2 ?? data.y, data });
     for (const player of app.state.players) {
       if (player.id === app.playerId || (!player.alive && player.lives === 0)) continue;
@@ -982,6 +1381,8 @@
       if (object.view.depth > depthBuffer[ray] + 18) return;
       if (object.type === "player") drawNeonPerson(object, horizon);
       else if (object.type === "powerup") drawPerspectivePowerup(object, horizon, now);
+      else if (object.type === "projectile") drawPerspectiveProjectile(object, horizon);
+      else if (object.type === "explosion") drawPerspectiveExplosion(object, horizon);
       else drawPerspectiveBullet(object, horizon);
     });
     drawWeaponView(camera.me, now, app.moveVisual, bob);
@@ -1071,6 +1472,21 @@
   function drawPerspectiveBullet(object, horizon) {
     const size = Math.max(3, Math.min(18, (object.data.radius || 5) * object.view.scale));
     ctx.save(); ctx.fillStyle = "#fff"; ctx.shadowColor = object.data.color; ctx.shadowBlur = 18; ctx.beginPath(); ctx.arc(object.view.x, groundY(object.view, horizon) - 34 * object.view.scale, size, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+  }
+
+  function drawPerspectiveProjectile(object, horizon) {
+    const size = Math.max(7, Math.min(32, 12 * object.view.scale));
+    const color = object.data.kind === "rpg" ? "#ff613f" : "#ffc14f";
+    const y = groundY(object.view, horizon) - ((object.data.z || 12) + 20) * object.view.scale;
+    ctx.save(); ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 24; ctx.beginPath(); ctx.arc(object.view.x, y, size, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+  }
+
+  function drawPerspectiveExplosion(object, horizon) {
+    const progress = Math.max(.08, Math.min(1, (object.data.remaining || .1) / .38));
+    const radius = Math.max(18, Math.min(canvas.width * .42, object.data.radius * object.view.scale * (1.15 - progress * .3)));
+    const y = groundY(object.view, horizon) - (object.data.z || 0) * object.view.scale;
+    const color = object.data.kind === "rpg" ? "#ff5438" : "#ffb62e";
+    ctx.save(); ctx.globalAlpha = progress * .75; ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 45; ctx.beginPath(); ctx.arc(object.view.x, y, radius, 0, Math.PI * 2); ctx.fill(); ctx.restore();
   }
 
   function drawWeaponView(me, now, movement, bob) {

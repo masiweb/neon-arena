@@ -9,6 +9,8 @@ Group=neonarena
 WorkingDirectory=__APP_DIR__
 Environment=PYTHONUNBUFFERED=1
 Environment=NEON_PUBLIC_ORIGIN=__PUBLIC_ORIGIN__
+Environment=NEON_DATABASE=/var/lib/neon-arena/neon-arena.db
+EnvironmentFile=-/etc/neon-arena.env
 ExecStart=__APP_DIR__/venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 8765 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1
 Restart=always
 RestartSec=3
@@ -16,6 +18,10 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
+ReadWritePaths=/var/lib/neon-arena
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
 
 [Install]
 WantedBy=multi-user.target

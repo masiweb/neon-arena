@@ -355,7 +355,7 @@
 
       for (const item of scene.powerups) {
         if (Math.hypot(item.x - scene.me.x, item.y - scene.me.y) > 1800) continue;
-        const colors = { speed:"#ffd52a", health:"#ff4f6f", shield:"#20d9ff", weapon:"#ff2da6", stealth:"#9b66ff" };
+        const colors = { speed:"#ffd52a", health:"#ff4f6f", shield:"#20d9ff", weapon:"#ff2da6", stealth:"#9b66ff", grenade:"#ffc14f", rpg:"#ff593f" };
         const itemHeight = 22 + Math.sin(scene.now * 0.0045 + item.x) * 4;
         drawBox([item.x, itemHeight, item.y], [19, 19, 19], colors[item.kind] || "#fff", 2, scene.now * 0.0017);
         drawBox([item.x, 3, item.y], [34, 1.2, 34], colors[item.kind] || "#fff", 2, scene.now * -0.001);
@@ -365,6 +365,31 @@
         if (player.id === scene.me.id || !player.alive) continue;
         const distance = Math.hypot(player.x - scene.me.x, player.y - scene.me.y);
         if (distance <= 2000) renderPlayer(player, scene.now, !mobile || distance < 820);
+      }
+
+      for (const projectile of scene.projectiles || []) {
+        if (Math.hypot(projectile.x - scene.me.x, projectile.y - scene.me.y) > 1900) continue;
+        const color = projectile.kind === "rpg" ? "#ff593f" : "#ffc14f";
+        const yaw = Math.atan2(projectile.vy || 0, projectile.vx || 1);
+        if (projectile.kind === "rpg") {
+          drawBox([projectile.x, (projectile.z || 0) + 2, projectile.y], [31, 7, 7], color, 2, yaw);
+          drawBox([projectile.x - Math.cos(yaw) * 17, (projectile.z || 0) + 2, projectile.y - Math.sin(yaw) * 17], [14, 3, 3], "#fff0a2", 2, yaw);
+        } else {
+          drawBox([projectile.x, (projectile.z || 0) + 7, projectile.y], [14, 14, 14], color, 2, scene.now * .008);
+        }
+      }
+
+      for (const explosion of scene.explosions || []) {
+        const life = Math.max(.05, Math.min(1, (explosion.remaining || .1) / .38));
+        const size = (explosion.radius || 120) * (1.05 - life * .42);
+        const color = explosion.kind === "rpg" ? "#ff4e35" : "#ffb72f";
+        const core = 18 + (1 - life) * 34;
+        const centerY = Math.max(15, explosion.z || 0);
+        drawBox([explosion.x, centerY, explosion.y], [core, core, core], "#fff4b0", 2, scene.now * .01);
+        drawBox([explosion.x, centerY, explosion.y], [size, 4, 5], color, 2, scene.now * .013);
+        drawBox([explosion.x, centerY, explosion.y], [5, 4, size], color, 2, -scene.now * .011);
+        drawBox([explosion.x, centerY + size * .16, explosion.y], [5, size * .45, 5], color, 2);
+        drawBox([explosion.x, 3, explosion.y], [size * 1.25, 1.4, size * 1.25], color, 2, -scene.now * .007);
       }
 
       for (const trace of scene.traces) {

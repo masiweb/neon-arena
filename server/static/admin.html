@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="theme-color" content="#050815" /><title>مدیریت نبرد نئون</title><link rel="stylesheet" href="/static/admin.css?v=3.0.0" /></head>
+  <body>
+    <header class="topbar"><div><small>NEON ARENA</small><h1>مرکز فرماندهی</h1></div><nav><a href="/">بازگشت به بازی</a><button id="refreshAll">به‌روزرسانی</button></nav></header>
+    <div class="shell">
+      <aside class="sidebar"><button class="active" data-page="overview">نمای کلی</button><button data-page="users">کاربران</button><button data-page="orders">سفارش‌ها</button><button data-page="products">فروشگاه</button><button data-page="ads">تبلیغات</button><button data-page="audit">گزارش مدیران</button></aside>
+      <main>
+        <div id="adminError" class="alert hidden"></div>
+        <section id="overviewPage" class="page"><div id="statsGrid" class="stats-grid"></div><article class="info-card"><h2>کنترل اقتصاد</h2><p>پاداش‌ها فقط از نتیجه‌ای که موتور رسمی سرور ثبت می‌کند پرداخت می‌شوند. خریدها تا اتصال درگاه در وضعیت «در انتظار» می‌مانند و مدیر می‌تواند پس از بررسی پرداخت آن‌ها را تأیید کند.</p></article></section>
+        <section id="usersPage" class="page hidden"><header class="page-head"><div><small>حساب‌ها</small><h2>مدیریت کاربران</h2></div><form id="userSearch"><input id="userQuery" placeholder="ایمیل یا نام کاربری" /><button>جست‌وجو</button></form></header><div id="usersTable" class="table-wrap"></div></section>
+        <section id="ordersPage" class="page hidden"><header class="page-head"><div><small>پرداخت دستی</small><h2>سفارش‌ها</h2></div></header><div id="ordersTable" class="table-wrap"></div></section>
+        <section id="productsPage" class="page hidden"><header class="page-head"><div><small>طلا و الماس</small><h2>محصولات فروشگاه</h2></div><button id="newProduct">محصول جدید</button></header><div id="productsTable" class="table-wrap"></div></section>
+        <section id="adsPage" class="page hidden"><header class="page-head"><div><small>جایگاه‌های ورود، لابی و نتیجه</small><h2>تبلیغات</h2></div><button id="newAd">تبلیغ جدید</button></header><div id="adsTable" class="table-wrap"></div></section>
+        <section id="auditPage" class="page hidden"><header class="page-head"><div><small>ثبت تغییرات حساس</small><h2>گزارش مدیران</h2></div></header><div id="auditTable" class="table-wrap"></div></section>
+      </main>
+    </div>
+    <div id="editor" class="modal hidden"><button id="editorBackdrop" class="backdrop"></button><form id="editorForm"><header><h2 id="editorTitle">ویرایش</h2><button id="closeEditor" type="button">×</button></header><div id="editorFields"></div><button class="primary" type="submit">ذخیره تغییرات</button></form></div>
+    <script src="/static/admin.js?v=3.0.0" defer></script>
+  </body>
+</html>

@@ -47,6 +47,7 @@ next-env.d.ts
 __pycache__/
 *.py[cod]
 .pytest_cache/
+/server/data/
 
 # Android build output and private signing material
 *.apk

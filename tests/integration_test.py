@@ -7,10 +7,11 @@ import json
 import os
 import sys
 import urllib.request
+import uuid
 
 import websockets
 
-from server.main import GAME_VERSION, PROTOCOL_VERSION
+from server.main import GAME_VERSION, PROTOCOL_VERSION, database
 
 BASE_HTTP = os.environ.get("NEON_TEST_HTTP", "http://127.0.0.1:8766").rstrip("/")
 BASE_WS = os.environ.get("NEON_TEST_WS", "ws://127.0.0.1:8766").rstrip("/")
@@ -24,8 +25,12 @@ async def receive_type(socket, wanted: str, timeout: float = 7.0) -> dict:
                 return payload
 
 
-def http_json(method: str, path: str) -> dict:
-    request = urllib.request.Request(f"{BASE_HTTP}{path}", method=method)
+def http_json(method: str, path: str, body: dict | None = None, token: str = "") -> dict:
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    headers = {"Content-Type": "application/json"} if data else {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(f"{BASE_HTTP}{path}", data=data, headers=headers, method=method)
     with urllib.request.urlopen(request, timeout=7) as response:
         return json.loads(response.read().decode("utf-8"))
 
@@ -35,17 +40,39 @@ async def main() -> None:
     assert health["ok"] is True
     assert health["version"] == GAME_VERSION
     assert health["protocol"] == PROTOCOL_VERSION
-    room = await asyncio.to_thread(http_json, "POST", "/api/rooms")
+    unique = uuid.uuid4().hex[:10]
+    one = await asyncio.to_thread(http_json, "POST", "/api/auth/register", {"email":f"one-{unique}@example.com","username":f"one_{unique}","password":"Password123","referralCode":""})
+    two = await asyncio.to_thread(http_json, "POST", "/api/auth/register", {"email":f"two-{unique}@example.com","username":f"two_{unique}","password":"Password123","referralCode":one["user"]["referralCode"]})
+    await asyncio.to_thread(database.promote_admin, f"one-{unique}@example.com")
+    me = await asyncio.to_thread(http_json, "GET", "/api/me", None, one["token"])
+    assert me["user"]["gold"] == 350
+    assert me["user"]["isAdmin"] is True
+    admin_stats = await asyncio.to_thread(http_json, "GET", "/api/admin/stats", None, one["token"])
+    assert admin_stats["users"] == 2
+    ad = await asyncio.to_thread(http_json, "POST", "/api/admin/ads", {"title":"Integration ad","body":"visible","imageUrl":"","targetUrl":"","placement":"lobby","active":True,"startsAt":None,"endsAt":None,"sortOrder":0}, one["token"])
+    assert ad["ad"]["title"] == "Integration ad"
+    audit = await asyncio.to_thread(http_json, "GET", "/api/admin/audit", None, one["token"])
+    assert audit["logs"]
+    team = await asyncio.to_thread(http_json, "POST", "/api/teams", {"name":"Integration Six"}, one["token"])
+    await asyncio.to_thread(http_json, "POST", "/api/teams/join", {"inviteCode":team["team"]["inviteCode"]}, two["token"])
+    room = await asyncio.to_thread(http_json, "POST", "/api/rooms", None, one["token"])
     code = room["code"]
+    same_room = await asyncio.to_thread(http_json, "POST", "/api/rooms", None, one["token"])
+    assert same_room["code"] == code and same_room["reused"] is True
 
     async with (
-        websockets.connect(f"{BASE_WS}/ws/{code}?name=One&protocol={PROTOCOL_VERSION}&client=android", proxy=None) as first,
-        websockets.connect(f"{BASE_WS}/ws/{code}?name=Two&protocol={PROTOCOL_VERSION}&client=web", proxy=None) as second,
+        websockets.connect(f"{BASE_WS}/ws/{code}?protocol={PROTOCOL_VERSION}&client=android", proxy=None) as first,
+        websockets.connect(f"{BASE_WS}/ws/{code}?protocol={PROTOCOL_VERSION}&client=web", proxy=None) as second,
     ):
+        await first.send(json.dumps({"type":"auth","token":one["token"]}))
+        await second.send(json.dumps({"type":"auth","token":two["token"]}))
         welcome_one = await receive_type(first, "welcome")
         welcome_two = await receive_type(second, "welcome")
         assert welcome_one["room"] == code == welcome_two["room"]
         assert len(welcome_one["maps"]) == 6
+        assert welcome_one["accountId"] == one["user"]["id"]
+        assert welcome_one["teamId"] == welcome_two["teamId"]
+        assert welcome_one["ownerUserId"] == one["user"]["id"]
         assert {level["id"] for level in welcome_one["botDifficulties"]} == {"easy", "normal", "hard"}
         await first.send(json.dumps({"type": "select_map", "map": "reactor"}))
         arena_update = await receive_type(first, "arena")
@@ -95,7 +122,11 @@ async def main() -> None:
         async with asyncio.timeout(6.0):
             while not powerup_state["powerups"]:
                 powerup_state = await receive_type(first, "state")
-        assert powerup_state["powerups"][0]["kind"] in {"speed", "health", "shield", "weapon", "stealth"}
+        assert powerup_state["powerups"][0]["kind"] in {"speed", "health", "shield", "weapon", "stealth", "grenade", "rpg"}
+        assert "projectiles" in powerup_state and "explosions" in powerup_state
+        await first.send(json.dumps({"type":"reset"}))
+        reset_state = await receive_type(first, "state")
+        assert reset_state["phase"] in {"countdown", "playing"}
 
     print("integration test: OK")
 

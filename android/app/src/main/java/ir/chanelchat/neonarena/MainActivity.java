@@ -1,8 +1,11 @@
 package ir.chanelchat.neonarena;
 
 import android.annotation.SuppressLint;
+import android.Manifest;
 import android.app.Activity;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -12,6 +15,7 @@ import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.WebChromeClient;
+import android.webkit.PermissionRequest;
 import android.webkit.WebResourceRequest;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebSettings;
@@ -20,7 +24,9 @@ import android.webkit.WebViewClient;
 
 public final class MainActivity extends Activity {
     private static final String PREF_SAFE_RENDERER = "safe_renderer";
+    private static final int MICROPHONE_PERMISSION_REQUEST = 410;
     private WebView gameView;
+    private PermissionRequest pendingMicrophoneRequest;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -45,17 +51,49 @@ public final class MainActivity extends Activity {
         settings.setSupportZoom(false);
         settings.setTextZoom(100);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " NeonArenaAndroid/2.2.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " NeonArenaAndroid/3.0.0");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             settings.setSafeBrowsingEnabled(true);
         }
 
-        gameView.setWebChromeClient(new WebChromeClient());
+        gameView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                runOnUiThread(() -> {
+                    boolean wantsAudio = false;
+                    for (String resource : request.getResources()) {
+                        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) wantsAudio = true;
+                    }
+                    if (!wantsAudio) {
+                        request.deny();
+                        return;
+                    }
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                        || checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                        request.grant(new String[] { PermissionRequest.RESOURCE_AUDIO_CAPTURE });
+                    } else {
+                        pendingMicrophoneRequest = request;
+                        requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO }, MICROPHONE_PERMISSION_REQUEST);
+                    }
+                });
+            }
+
+            @Override
+            public void onPermissionRequestCanceled(PermissionRequest request) {
+                if (request == pendingMicrophoneRequest) pendingMicrophoneRequest = null;
+            }
+        });
         gameView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
-                return !("file".equals(uri.getScheme()) && uri.toString().startsWith("file:///android_asset/"));
+                if ("file".equals(uri.getScheme()) && uri.toString().startsWith("file:///android_asset/")) {
+                    return false;
+                }
+                if ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme())) {
+                    startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                }
+                return true;
             }
 
             @Override
@@ -82,6 +120,18 @@ public final class MainActivity extends Activity {
         setContentView(gameView);
         gameView.post(this::hideSystemBars);
         gameView.loadUrl("file:///android_asset/index.html");
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != MICROPHONE_PERMISSION_REQUEST || pendingMicrophoneRequest == null) return;
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            pendingMicrophoneRequest.grant(new String[] { PermissionRequest.RESOURCE_AUDIO_CAPTURE });
+        } else {
+            pendingMicrophoneRequest.deny();
+        }
+        pendingMicrophoneRequest = null;
     }
 
     private void hideSystemBars() {

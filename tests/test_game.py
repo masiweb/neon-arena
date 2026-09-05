@@ -99,7 +99,7 @@ class GameRulesTests(unittest.TestCase):
 
     def test_room_codes_are_unique_and_mobile_friendly(self) -> None:
         hub = GameHub()
-        codes = {hub.create_room().code for _ in range(200)}
+        codes = {hub.create_room()[0].code for _ in range(200)}
         self.assertEqual(len(codes), 200)
         self.assertTrue(all(len(code) == 4 and "0" not in code and "O" not in code for code in codes))
 
@@ -126,11 +126,15 @@ class GameRulesTests(unittest.TestCase):
         room._apply_powerup(player, "shield", now)
         room._apply_powerup(player, "weapon", now)
         room._apply_powerup(player, "stealth", now)
+        room._apply_powerup(player, "grenade", now)
+        room._apply_powerup(player, "rpg", now)
         self.assertEqual(player.health, 135)
         self.assertGreater(player.speed_until, now)
         self.assertGreater(player.shield_until, now)
         self.assertIn(player.weapon, {"heavy", "rapid", "spread"})
         self.assertGreater(player.radar_hidden_until, now)
+        self.assertEqual(player.grenades, 3)
+        self.assertEqual(player.rockets, 3)
         self.assertTrue(player.public(now)["radarHidden"])
 
     def test_winner_can_choose_next_round_weapon(self) -> None:
@@ -226,6 +230,64 @@ class GameRulesTests(unittest.TestCase):
         bot.last_shot = 0
         room._fire(bot, time.monotonic())
         self.assertEqual(target.health, 65)
+
+    def test_friendly_fire_is_disabled(self) -> None:
+        room = Room("TEST")
+        shooter = make_player("shooter")
+        teammate = make_player("teammate")
+        enemy = make_player("enemy")
+        shooter.team_id = teammate.team_id = 9
+        enemy.team_id = 10
+        shooter.x, shooter.y = 50, 350
+        teammate.x, teammate.y = 120, 350
+        enemy.x, enemy.y = 180, 350
+        shooter.aim_x, shooter.aim_y = 1, 0
+        room.players = {item.id: item for item in (shooter, teammate, enemy)}
+        room._fire(shooter, time.monotonic())
+        self.assertEqual(teammate.health, 100)
+        self.assertEqual(enemy.health, 90)
+
+    def test_grenade_and_rpg_ammo_and_trajectory(self) -> None:
+        room = Room("TEST")
+        player = make_player()
+        room.players[player.id] = player
+        room.phase = "playing"
+        now = time.monotonic()
+        room._apply_powerup(player, "grenade", now)
+        asyncio.run(room.handle(player, {"type": "action", "action": "grenade"}))
+        self.assertEqual(player.grenades, 2)
+        self.assertEqual(room.projectiles[0].kind, "grenade")
+        self.assertGreater(room.projectiles[0].vz, 0)
+        room._update_projectiles(0.1, now + 0.1)
+        self.assertGreater(room.projectiles[0].z, 48)
+        player.last_explosive_at = 0
+        room._apply_powerup(player, "rpg", now)
+        asyncio.run(room.handle(player, {"type": "action", "action": "rpg"}))
+        self.assertEqual(player.rockets, 2)
+        self.assertTrue(any(item.kind == "rpg" for item in room.projectiles))
+
+    def test_only_room_owner_can_reset(self) -> None:
+        owner = make_player("owner")
+        guest = make_player("guest")
+        room = Room("TEST", owner_user_id=11)
+        owner.account_id, guest.account_id = 11, 12
+        room.players = {owner.id: owner, guest.id: guest}
+        room.host_id = owner.id
+        room.phase = "playing"
+        room.round_id = "old-round"
+        asyncio.run(room.handle(guest, {"type": "reset"}))
+        self.assertEqual(room.round_id, "old-round")
+        asyncio.run(room.handle(owner, {"type": "reset"}))
+        self.assertNotEqual(room.round_id, "old-round")
+        self.assertEqual(room.phase, "countdown")
+
+    def test_owner_can_have_only_one_active_room(self) -> None:
+        hub = GameHub()
+        first, reused_first = hub.create_room(owner_user_id=42)
+        second, reused_second = hub.create_room(owner_user_id=42)
+        self.assertFalse(reused_first)
+        self.assertTrue(reused_second)
+        self.assertIs(first, second)
 
     def test_round_start_places_players_apart(self) -> None:
         room = Room("TEST")

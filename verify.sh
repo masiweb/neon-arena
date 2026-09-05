@@ -7,6 +7,7 @@ RUN_INTEGRATION=0
 PORT="${NEON_TEST_PORT:-8766}"
 SERVER_PID=""
 SERVER_LOG=""
+TEST_DATABASE="${NEON_TEST_DATABASE:-}"
 
 usage() {
   cat <<'EOF'
@@ -24,6 +25,9 @@ cleanup() {
   fi
   if [[ -n "${SERVER_LOG}" && -f "${SERVER_LOG}" ]]; then
     rm -f "${SERVER_LOG}"
+  fi
+  if [[ -n "${TEST_DATABASE}" && "${TEST_DATABASE}" == /tmp/neon-* ]]; then
+    rm -f "${TEST_DATABASE}" "${TEST_DATABASE}-shm" "${TEST_DATABASE}-wal"
   fi
 }
 trap cleanup EXIT
@@ -76,6 +80,7 @@ bash -n "${ROOT_DIR}/android/build-apk.sh"
 bash -n "${ROOT_DIR}/verify.sh"
 node --check "${ROOT_DIR}/server/static/game.js"
 node --check "${ROOT_DIR}/server/static/renderer3d.js"
+node --check "${ROOT_DIR}/server/static/admin.js"
 
 echo "[2/3] Running Python unit tests..."
 (
@@ -91,9 +96,13 @@ fi
 
 echo "[3/3] Running isolated HTTP/WebSocket integration test..."
 SERVER_LOG="$(mktemp /tmp/neon-arena-test.XXXXXX.log)"
+if [[ -z "${TEST_DATABASE}" ]]; then
+  TEST_DATABASE="$(mktemp /tmp/neon-arena-integration.XXXXXX.db)"
+fi
 (
   cd "${ROOT_DIR}"
   exec env PYTHONPATH="${ROOT_DIR}" NEON_PUBLIC_ORIGIN="http://127.0.0.1:${PORT}" \
+    NEON_DATABASE="${TEST_DATABASE}" NEON_DEV_RESET=1 \
     "${PYTHON_BIN}" -m uvicorn server.main:app \
     --host 127.0.0.1 --port "${PORT}" --workers 1
 ) >"${SERVER_LOG}" 2>&1 &
@@ -121,6 +130,7 @@ fi
   cd "${ROOT_DIR}"
   NEON_TEST_HTTP="http://127.0.0.1:${PORT}" \
   NEON_TEST_WS="ws://127.0.0.1:${PORT}" \
+  NEON_DATABASE="${TEST_DATABASE}" \
   PYTHONPATH="${ROOT_DIR}" \
     "${PYTHON_BIN}" tests/integration_test.py
 )

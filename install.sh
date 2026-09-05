@@ -3,6 +3,8 @@ set -euo pipefail
 
 APP_DIR="/opt/neon-arena"
 APP_USER="neonarena"
+DATA_DIR="/var/lib/neon-arena"
+SIGNING_DIR="${DATA_DIR}/signing"
 SERVICE_NAME="neon-arena"
 DOMAIN=""
 PUBLIC_ORIGIN=""
@@ -173,7 +175,7 @@ echo "Installing Neon Arena ${GAME_VERSION} for ${PUBLIC_ORIGIN}"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y \
-  ca-certificates curl git nginx nodejs python3 python3-pip python3-venv \
+  ca-certificates curl git nginx nodejs python3 python3-pip python3-venv sqlite3 \
   unzip util-linux wget openjdk-17-jdk-headless
 
 if [[ "${NEEDS_BUILD_SWAP}" -eq 1 ]]; then
@@ -196,6 +198,11 @@ if ! id "${APP_USER}" >/dev/null 2>&1; then
   useradd --system --home "${APP_DIR}" --shell /usr/sbin/nologin "${APP_USER}"
 fi
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_DIR}"
+install -d -m 0750 -o "${APP_USER}" -g "${APP_USER}" "${DATA_DIR}"
+install -d -m 0700 -o root -g root "${SIGNING_DIR}"
+if [[ ! -f /etc/neon-arena.env ]]; then
+  install -m 0640 -o root -g "${APP_USER}" "${SCRIPT_DIR}/.env.example" /etc/neon-arena.env
+fi
 
 python3 -m venv "${APP_DIR}/venv"
 "${APP_DIR}/venv/bin/pip" install --upgrade pip
@@ -204,12 +211,21 @@ chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}/venv"
 
 echo "Running unit and live multiplayer tests before deployment..."
 chmod +x "${SCRIPT_DIR}/verify.sh"
-"${SCRIPT_DIR}/verify.sh" --python "${APP_DIR}/venv/bin/python" --integration --port 8766
+NEON_TEST_DATABASE="$(mktemp /tmp/neon-arena-test-db.XXXXXX)" \
+  "${SCRIPT_DIR}/verify.sh" --python "${APP_DIR}/venv/bin/python" --integration --port 8766
 
 APK_SOURCE=""
 if [[ "${BUILD_ANDROID}" -eq 1 ]]; then
   echo "Installing Android build tools and building the APK..."
   BUILD_TMP="$(mktemp -d /tmp/neon-arena-android.XXXXXX)"
+
+  # Keep Android updates signed by the same key across reinstalls and server
+  # migrations. If this is the first v3 install, preserve Gradle's existing
+  # debug key after the build; later installs restore it before Gradle runs.
+  if [[ -f "${SIGNING_DIR}/debug.keystore" ]]; then
+    install -d -m 0700 /root/.android
+    install -m 0600 "${SIGNING_DIR}/debug.keystore" /root/.android/debug.keystore
+  fi
 
   if [[ ! -x "/opt/gradle-${GRADLE_VERSION}/bin/gradle" ]]; then
     wget -q --show-progress -O "${BUILD_TMP}/gradle.zip" \
@@ -249,6 +265,8 @@ if [[ "${BUILD_ANDROID}" -eq 1 ]]; then
 
   APK_SOURCE="${SCRIPT_DIR}/android/app/build/outputs/apk/debug/app-debug.apk"
   [[ -s "${APK_SOURCE}" ]] || fail "Gradle finished but no APK was produced."
+  [[ -f /root/.android/debug.keystore ]] || fail "Android signing key was not generated."
+  install -m 0600 /root/.android/debug.keystore "${SIGNING_DIR}/debug.keystore"
   "${ANDROID_SDK_ROOT}/build-tools/35.0.0/apksigner" verify --verbose "${APK_SOURCE}"
   unzip -p "${APK_SOURCE}" assets/game.js > "${BUILD_TMP}/embedded-game.js"
   grep -Fq "${PUBLIC_ORIGIN}" "${BUILD_TMP}/embedded-game.js" || \
@@ -333,6 +351,9 @@ echo
 echo "Neon Arena ${GAME_VERSION} is ready:"
 echo "Game: ${PUBLIC_ORIGIN}"
 echo "Health: ${PUBLIC_HEALTH}"
+echo "Admin: ${PUBLIC_ORIGIN}/admin"
+echo "Promote first admin after registration:"
+echo "  sudo -u ${APP_USER} NEON_DATABASE=${DATA_DIR}/neon-arena.db ${APP_DIR}/venv/bin/python -m server.manage promote-admin --email YOU@example.com"
 if [[ "${BUILD_ANDROID}" -eq 1 ]]; then
   echo "APK (latest): ${PUBLIC_ORIGIN}/static/neon-arena-android-latest.apk"
   echo "APK (versioned): ${PUBLIC_ORIGIN}/static/${APK_NAME}"
