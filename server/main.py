@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -20,10 +21,11 @@ app = FastAPI(title="Neon Arena", docs_url=None, redoc_url=None)
 hub = GameHub()
 GAME_VERSION = "2.1.0"
 PROTOCOL_VERSION = "6"
+PUBLIC_ORIGIN = os.environ.get("NEON_PUBLIC_ORIGIN", "https://game.chanelchat.ir").rstrip("/")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["null", "https://game.chanelchat.ir"],
+    allow_origins=["null", PUBLIC_ORIGIN],
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],

@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import urllib.request
 
 import websockets
 
+from server.main import GAME_VERSION, PROTOCOL_VERSION
 
-BASE_HTTP = "http://127.0.0.1:8766"
-BASE_WS = "ws://127.0.0.1:8766"
+BASE_HTTP = os.environ.get("NEON_TEST_HTTP", "http://127.0.0.1:8766").rstrip("/")
+BASE_WS = os.environ.get("NEON_TEST_WS", "ws://127.0.0.1:8766").rstrip("/")
 
 
 async def receive_type(socket, wanted: str, timeout: float = 7.0) -> dict:
@@ -31,14 +33,14 @@ def http_json(method: str, path: str) -> dict:
 async def main() -> None:
     health = await asyncio.to_thread(http_json, "GET", "/health")
     assert health["ok"] is True
-    assert health["version"] == "2.1.0"
-    assert health["protocol"] == "6"
+    assert health["version"] == GAME_VERSION
+    assert health["protocol"] == PROTOCOL_VERSION
     room = await asyncio.to_thread(http_json, "POST", "/api/rooms")
     code = room["code"]
 
     async with (
-        websockets.connect(f"{BASE_WS}/ws/{code}?name=One&protocol=6&client=android", proxy=None) as first,
-        websockets.connect(f"{BASE_WS}/ws/{code}?name=Two&protocol=6&client=web", proxy=None) as second,
+        websockets.connect(f"{BASE_WS}/ws/{code}?name=One&protocol={PROTOCOL_VERSION}&client=android", proxy=None) as first,
+        websockets.connect(f"{BASE_WS}/ws/{code}?name=Two&protocol={PROTOCOL_VERSION}&client=web", proxy=None) as second,
     ):
         welcome_one = await receive_type(first, "welcome")
         welcome_two = await receive_type(second, "welcome")

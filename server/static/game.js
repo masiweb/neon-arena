@@ -54,8 +54,14 @@
   };
 
   const isAndroidApp = location.protocol === "file:";
-  const httpOrigin = isAndroidApp ? "https://game.chanelchat.ir" : location.origin;
-  const wsOrigin = isAndroidApp ? "wss://game.chanelchat.ir" : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
+  const bundledServerOrigin = "__NEON_SERVER_ORIGIN__";
+  const androidServerOrigin = bundledServerOrigin.startsWith("https://")
+    ? bundledServerOrigin.replace(/\/$/, "")
+    : "https://game.chanelchat.ir";
+  const httpOrigin = isAndroidApp ? androidServerOrigin : location.origin;
+  const wsOrigin = isAndroidApp
+    ? androidServerOrigin.replace(/^https:/, "wss:")
+    : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
   const protocolVersion = "6";
   if (isAndroidApp) $("downloadAndroid")?.classList.add("hidden");
 

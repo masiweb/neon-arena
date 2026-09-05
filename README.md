@@ -33,58 +33,73 @@
 
 ## نصب سریع روی Ubuntu 24.04
 
-روی Ubuntu 24.04 خام، مخزن را دریافت و نصب کامل را اجرا کنید:
+قبل از نصب، رکورد `A` دامنه را به IP سرور جدید تغییر دهید و مطمئن شوید پورت‌های `80` و `443` در فایروال باز هستند. سپس روی Ubuntu 24.04 خام اجرا کنید:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git
+cd /root
 git clone https://github.com/masiweb/neon-arena.git
-cd neon-arena
-sudo bash install.sh --domain game.example.com --ssl
+cd /root/neon-arena
+sudo bash install.sh --domain game.chanelchat.ir --ssl
 ```
 
-اسکریپت به‌صورت خودکار Python، Nginx، Java 17، Gradle 8.7، Android CLI، Android API 35 و Build Tools نسخه‌های 34 و 35 را نصب می‌کند؛ سپس سرور و APK نسخه جاری را آماده می‌کند.
+اسکریپت همه وابستگی‌ها را نصب می‌کند: Python، Node.js، Nginx، Java 17 JDK کامل، Gradle 8.7، Android CLI، Android API 35 و Build Tools نسخه‌های 34 و 35. سپس تست‌های واحد و تست زنده HTTP/WebSocket را اجرا می‌کند، APK مخصوص همان دامنه را می‌سازد، امضای APK را بررسی می‌کند و در پایان سرویس systemd، Nginx و SSL را راه می‌اندازد.
+
+کد فعال فقط پس از موفق‌شدن تست‌ها و ساخت APK جایگزین می‌شود. اگر نسخه جدید از health check عبور نکند، نصب‌کننده فایل‌های نسخه قبلی سرور را برمی‌گرداند.
 
 صفحه ورود همیشه دکمه دانلود اندروید را با نشانی ثابت زیر نمایش می‌دهد و نصب‌کننده در هر ارتقا فایل آن را با جدیدترین APK جایگزین می‌کند:
 
 ```text
-https://game.example.com/static/neon-arena-android-latest.apk
+https://game.chanelchat.ir/static/neon-arena-android-latest.apk
 ```
 
 اگر روی یک سرور سبک فقط وب‌سرور را می‌خواهید و ساخت APK لازم نیست:
 
 ```bash
-sudo bash install.sh --domain game.example.com --ssl --skip-android
+sudo bash install.sh --domain game.chanelchat.ir --ssl --skip-android
 ```
 
-اگر فعلاً دامنه ندارید:
+اگر فعلاً دامنه ندارید، فقط نسخه وب را با IP نصب کنید. APK به HTTPS و دامنه معتبر نیاز دارد:
 
 ```bash
-sudo bash install.sh --domain YOUR_SERVER_IP
+sudo bash install.sh --domain YOUR_SERVER_IP --skip-android
 ```
 
 بعد از پایان نصب، آدرس نمایش‌داده‌شده را با گوشی باز کنید. یک نفر «ساخت اتاق جدید» را می‌زند و لینک دعوت را برای بقیه می‌فرستد.
 
 مرورگرها فقط بعد از لمس کاربر اجازه تمام‌صفحه می‌دهند. دکمه‌های ساخت/ورود به اتاق این درخواست را خودکار ارسال می‌کنند و دکمه `⛶` نیز همیشه داخل بازی در دسترس است.
 
-برای ارتقا از نسخه قبلی، ZIP جدید را استخراج و همان دستور نصب را دوباره اجرا کنید؛ سرویس با کد جدید به‌صورت خودکار ری‌استارت می‌شود.
+برای ارتقا، فقط این سه دستور را اجرا کنید:
+
+```bash
+cd /root/neon-arena
+git pull --ff-only origin main
+sudo bash install.sh --domain game.chanelchat.ir --ssl
+```
+
+نصب‌کننده تکرارپذیر است؛ ابزارهای موجود را دوباره دانلود نمی‌کند و همیشه فایل `neon-arena-android-latest.apk` را با آخرین خروجی موفق جایگزین می‌کند.
 
 ## نسخه اندروید
 
-پروژه APK در پوشه `android/` قرار دارد. فایل‌های رابط بازی هنگام build داخل APK کپی می‌شوند؛ فقط وضعیت آنلاین بازی از طریق HTTPS و WebSocket از `game.chanelchat.ir` دریافت می‌شود. حداقل نسخه موردنیاز Android 7 است.
+پروژه APK در پوشه `android/` قرار دارد. فایل‌های رابط بازی هنگام build داخل APK کپی می‌شوند؛ فقط وضعیت آنلاین بازی از طریق HTTPS و WebSocket از سروری دریافت می‌شود که هنگام build تعیین شده است. حداقل نسخه موردنیاز Android 7 است.
 
 برای ساخت نسخه آزمایشی نصب‌شدنی با Java 17، Android SDK 35 و Gradle 8.7:
 
 ```bash
 cd android
 chmod +x build-apk.sh
-./build-apk.sh
+GAME_SERVER_ORIGIN=https://game.chanelchat.ir ./build-apk.sh
 ```
 
 خروجی در `android/app/build/outputs/apk/debug/app-debug.apk` ساخته می‌شود. Workflow آماده GitHub Actions نیز در `.github/workflows/build-android.yml` وجود دارد.
 
-## شرایط دامنه و SSL
+## شرایط سرور، دامنه و SSL
 
-برای SSL باید رکورد A دامنه از قبل به IP سرور اشاره کند و پورت‌های 80 و 443 باز باشند. اگر فقط با IP نصب کنید، بازی با HTTP اجرا می‌شود.
+- سیستم‌عامل پیشنهادی: Ubuntu 24.04 x86_64
+- فضای خالی برای ساخت APK: حداقل 3.5GB
+- RAM پیشنهادی هنگام build: حداقل 2GB به‌همراه swap؛ اجرای خود بازی بسیار سبک‌تر است
+- برای SSL باید رکورد A دامنه به IP همان سرور اشاره کند و پورت‌های 80 و 443 باز باشند
+- APK فقط به HTTPS متصل می‌شود؛ برای نصب صرفاً با IP از `--skip-android` استفاده کنید
 
 ## دستورات مدیریت
 
@@ -99,6 +114,15 @@ sudo journalctl -u neon-arena -n 100 --no-pager
 ```bash
 curl http://127.0.0.1:8765/health
 ```
+
+اجرای همه تست‌ها روی سورس فعلی:
+
+```bash
+cd /root/neon-arena
+./verify.sh --python /opt/neon-arena/venv/bin/python --integration
+```
+
+GitHub Actions نیز در هر تغییر، تست‌های سرور/نصب‌کننده و ساخت APK را جداگانه اجرا می‌کند.
 
 ## اجرای آزمایشی بدون Nginx
 
@@ -126,4 +150,5 @@ server/static/game.js        کنترل لمسی و رندر Canvas
 android/                     پوسته بومی تمام‌صفحه و پروژه ساخت APK
 deploy/                      تنظیمات systemd و Nginx
 install.sh                   نصب خودکار Ubuntu 24
+verify.sh                    تست syntax، قوانین بازی، HTTP و WebSocket
 ```

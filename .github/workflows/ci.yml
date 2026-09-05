@@ -1,0 +1,46 @@
+name: Test Server and Installer
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "tests/**"
+      - "deploy/**"
+      - "install.sh"
+      - "verify.sh"
+      - ".github/workflows/ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install server dependencies
+        run: python -m pip install -r server/requirements.txt
+
+      - name: Verify syntax, rules, HTTP and WebSocket gameplay
+        run: |
+          chmod +x verify.sh
+          ./verify.sh --python python --integration

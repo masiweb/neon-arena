@@ -2,6 +2,9 @@ plugins {
     id "com.android.application"
 }
 
+def gameServerOrigin = providers.gradleProperty("gameServerOrigin")
+    .orElse("https://game.chanelchat.ir")
+
 android {
     namespace "ir.chanelchat.neonarena"
     compileSdk 35
@@ -41,6 +44,7 @@ tasks.register("syncGameAssets", Copy) {
             .replace('href="/static/styles.css?v=2.1.0"', 'href="styles.css?v=2.1.0"')
             .replace('src="/static/renderer3d.js?v=2.1.0"', 'src="renderer3d.js?v=2.1.0"')
             .replace('src="/static/game.js?v=2.1.0"', 'src="game.js?v=2.1.0"')
+            .replace('__NEON_SERVER_ORIGIN__', gameServerOrigin.get())
     }
 }
 
