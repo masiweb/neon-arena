@@ -112,6 +112,7 @@
     aim: [1, 0],
     cameraAngle: 0,
     cameraPitch: 0,
+    lastPitchInputAt: 0,
     moveVisual: 0,
     assistTargetId: null,
     shooting: false,
@@ -641,6 +642,7 @@
     const maxDelta = mouse ? 90 : 52;
     app.cameraAngle += Math.max(-maxDelta, Math.min(maxDelta, dx)) * (mouse ? yawSensitivity : .00325);
     app.cameraPitch = Math.max(-.48, Math.min(.42, app.cameraPitch - Math.max(-48, Math.min(48, dy)) * pitchSensitivity));
+    if (Math.abs(dy) > 1.5) app.lastPitchInputAt = performance.now();
   }
 
   lookSurface.addEventListener("pointerdown", (event) => {
@@ -732,20 +734,22 @@
       const delta = Math.atan2(Math.sin(direction - app.cameraAngle), Math.cos(direction - app.cameraAngle));
       const angleError = Math.abs(delta);
       const score = angleError * 900 + distance;
-      if (distance < maximumDistance && angleError < cone && score < bestScore && hasLineOfSight(me.x, me.y, player.x, player.y, (me.z || 0) + 48)) {
-        best = { player, direction, delta, distance };
+      const bodyPitch = Math.atan2(((player.z || 0) + 40) - ((me.z || 0) + 63), distance || 1);
+      if (distance < maximumDistance && angleError < cone && score < bestScore && hasLineOfSight(me.x, me.y, player.x, player.y, (me.z || 0) + 63, bodyPitch)) {
+        best = { player, direction, delta, distance, bodyPitch };
         bestScore = score;
       }
     }
     return best;
   }
 
-  function hasLineOfSight(x1, y1, x2, y2, rayHeight = 48) {
+  function hasLineOfSight(x1, y1, x2, y2, rayHeight = 63, pitch = 0) {
     const distance = Math.hypot(x2 - x1, y2 - y1);
     const steps = Math.max(1, Math.ceil(distance / 18));
     for (let step = 2; step < steps; step++) {
       const ratio = step / steps;
-      if (wallAt(x1 + (x2 - x1) * ratio, y1 + (y2 - y1) * ratio, rayHeight) >= 0) return false;
+      const height = rayHeight + Math.tan(pitch) * distance * ratio;
+      if (wallAt(x1 + (x2 - x1) * ratio, y1 + (y2 - y1) * ratio, height) >= 0) return false;
     }
     return true;
   }
@@ -757,6 +761,7 @@
     if (target && app.shooting) {
       const pull = coarsePointer ? .16 : .055;
       app.cameraAngle += target.delta * pull;
+      if (performance.now() - app.lastPitchInputAt > 750) app.cameraPitch = target.bodyPitch;
       return [Math.cos(target.direction), Math.sin(target.direction)];
     }
     return [Math.cos(app.cameraAngle), Math.sin(app.cameraAngle)];
@@ -920,7 +925,7 @@
       const angle = baseAngle + spread;
       const dx = Math.cos(angle);
       const dy = Math.sin(angle);
-      const shotHeight = (rendered.z || 0) + 48;
+      const shotHeight = (rendered.z || 0) + 63;
       const end = traceEnd(rendered.x + dx * 31, rendered.y + dy * 31, dx, dy, 920, shotHeight, app.cameraPitch);
       app.localBullets.push({
         id: `local-${now}-${spread}`,

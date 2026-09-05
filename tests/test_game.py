@@ -8,6 +8,7 @@ from server.game import (
     HIT_ZONE_DAMAGE,
     JUMP_VELOCITY,
     OBSTACLES,
+    SHOT_ORIGIN_HEIGHT,
     STARTING_LIVES,
     GameHub,
     Player,
@@ -44,6 +45,7 @@ class GameRulesTests(unittest.TestCase):
         shooter.x, shooter.y = 50, 350
         target.x, target.y = 130, 350
         shooter.aim_x, shooter.aim_y = 1, 0
+        shooter.aim_pitch = math.atan2(40 - SHOT_ORIGIN_HEIGHT, target.x - (shooter.x + 31))
         room._fire(shooter, time.monotonic())
         self.assertEqual(target.health, 75)
         self.assertEqual(len(room.bullets), 1)
@@ -224,6 +226,7 @@ class GameRulesTests(unittest.TestCase):
         bot.x, bot.y = 50, 350
         target.x, target.y = 130, 350
         bot.aim_x, bot.aim_y = 1, 0
+        bot.aim_pitch = math.atan2(40 - SHOT_ORIGIN_HEIGHT, target.x - (bot.x + 31))
         room.players = {bot.id: bot, target.id: target}
         room._fire(bot, time.monotonic())
         self.assertEqual(target.health, 75)
@@ -243,7 +246,7 @@ class GameRulesTests(unittest.TestCase):
                 target.x, target.y = 180, 350
                 shooter.aim_x, shooter.aim_y = 1, 0
                 projection = target.x - (shooter.x + 31)
-                shooter.aim_pitch = math.atan2(impact_height - 48, projection)
+                shooter.aim_pitch = math.atan2(impact_height - SHOT_ORIGIN_HEIGHT, projection)
                 room.players = {shooter.id: shooter, target.id: target}
                 room._fire(shooter, time.monotonic())
                 self.assertEqual(room.bullets[-1].hit_zone, zone)
@@ -257,7 +260,7 @@ class GameRulesTests(unittest.TestCase):
         shooter.x, shooter.y = 50, 350
         target.x, target.y, target.health = 180, 350, 140
         shooter.aim_x, shooter.aim_y = 1, 0
-        shooter.aim_pitch = math.atan2(60 - 48, target.x - (shooter.x + 31))
+        shooter.aim_pitch = math.atan2(60 - SHOT_ORIGIN_HEIGHT, target.x - (shooter.x + 31))
         room.players = {shooter.id: shooter, target.id: target}
         room._fire(shooter, time.monotonic())
         self.assertEqual(target.health, 0)
@@ -273,6 +276,7 @@ class GameRulesTests(unittest.TestCase):
         teammate.x, teammate.y = 120, 350
         enemy.x, enemy.y = 180, 350
         shooter.aim_x, shooter.aim_y = 1, 0
+        shooter.aim_pitch = math.atan2(40 - SHOT_ORIGIN_HEIGHT, enemy.x - (shooter.x + 31))
         room.players = {item.id: item for item in (shooter, teammate, enemy)}
         room._fire(shooter, time.monotonic())
         self.assertEqual(teammate.health, 100)
