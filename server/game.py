@@ -21,6 +21,8 @@ ARENA_HEIGHT = int(MAPS[DEFAULT_MAP_ID]["height"])
 PLAYER_RADIUS = 21
 PLAYER_HEIGHT = 72
 PLAYER_SPEED = 285.0
+SHOT_ORIGIN_HEIGHT = 48.0
+INPUT_TIMEOUT = 0.45
 BULLET_SPEED = 650.0
 JUMP_VELOCITY = 430.0
 GRAVITY = 920.0
@@ -70,11 +72,13 @@ POWERUP_LABELS = {
 }
 
 WEAPON_SPECS: dict[str, dict[str, Any]] = {
-    "base": {"interval": 0.22, "damage": 10, "range": 920.0, "spread": [0.0]},
-    "heavy": {"interval": 0.46, "damage": 25, "range": 1050.0, "spread": [0.0]},
-    "rapid": {"interval": 0.105, "damage": 7, "range": 820.0, "spread": [-0.015, 0.015]},
-    "spread": {"interval": 0.39, "damage": 9, "range": 620.0, "spread": [-0.09, 0.0, 0.09]},
+    "base": {"interval": 0.22, "range": 920.0, "spread": [0.0]},
+    "heavy": {"interval": 0.46, "range": 1050.0, "spread": [0.0]},
+    "rapid": {"interval": 0.105, "range": 820.0, "spread": [-0.015, 0.015]},
+    "spread": {"interval": 0.39, "range": 620.0, "spread": [-0.09, 0.0, 0.09]},
 }
+
+HIT_ZONE_DAMAGE = {"head": 100, "neck": 90, "body": 25, "limb": 10}
 
 BOT_DIFFICULTIES: dict[str, dict[str, Any]] = {
     "easy": {"name": "آسان", "aim_error": 0.24, "range": 520.0, "speed": 0.78, "fire_delay": 1.55},
@@ -102,6 +106,17 @@ def movement_vector(x: float, y: float) -> tuple[float, float]:
     if length <= 1.0:
         return x, y
     return x / length, y / length
+
+
+def hit_zone(relative_height: float, perpendicular_distance: float) -> str:
+    """Classify a hit against the 72-unit articulated player model."""
+    if relative_height >= 56.0:
+        return "head"
+    if relative_height >= 50.0:
+        return "neck"
+    if relative_height >= 22.0 and perpendicular_distance <= PLAYER_RADIUS * 0.65:
+        return "body"
+    return "limb"
 
 
 def circle_hits_rect(x: float, y: float, radius: float, rect: dict[str, int]) -> bool:
@@ -222,6 +237,7 @@ class Player:
     move_y: float = 0.0
     aim_x: float = 1.0
     aim_y: float = 0.0
+    aim_pitch: float = 0.0
     shooting: bool = False
     last_input_seq: int = 0
     last_input_at: float = field(default_factory=time.monotonic)
@@ -262,6 +278,7 @@ class Player:
             "score": self.score,
             "alive": self.alive,
             "aim": [round(self.aim_x, 2), round(self.aim_y, 2)],
+            "pitch": round(self.aim_pitch, 3),
             "shield": self.shield_until > now,
             "speedBoost": self.speed_until > now,
             "dashing": self.dash_until > now,
@@ -292,6 +309,8 @@ class Bullet:
     color: str
     expires_at: float
     hit: bool = False
+    hit_zone: str = ""
+    z2: float | None = None
 
     def public(self) -> dict[str, Any]:
         return {
@@ -302,8 +321,10 @@ class Bullet:
             "x2": round(self.x2, 1),
             "y2": round(self.y2, 1),
             "z": round(self.z, 1),
+            "z2": round(self.z if self.z2 is None else self.z2, 1),
             "color": self.color,
             "hit": self.hit,
+            "hitZone": self.hit_zone,
         }
 
 
@@ -539,6 +560,9 @@ class Room:
                     ax, ay = normalize(float(aim[0]), float(aim[1]))
                     if ax or ay:
                         player.aim_x, player.aim_y = ax, ay
+                pitch = float(payload.get("pitch", player.aim_pitch))
+                if math.isfinite(pitch):
+                    player.aim_pitch = clamp(pitch, -0.48, 0.42)
             except (TypeError, ValueError, OverflowError):
                 return
             player.shooting = bool(payload.get("shooting", False))
@@ -781,7 +805,7 @@ class Room:
 
             if player.is_bot:
                 self._update_bot_input(player, now)
-            elif now - player.last_input_at > 0.28:
+            elif now - player.last_input_at > INPUT_TIMEOUT:
                 player.move_x = 0.0
                 player.move_y = 0.0
                 player.shooting = False
@@ -843,6 +867,11 @@ class Room:
         aim_error = math.sin(now * 2.15 + noise_seed) * float(difficulty["aim_error"])
         aim_x, aim_y = math.cos(ideal_angle + aim_error), math.sin(ideal_angle + aim_error)
         bot.aim_x, bot.aim_y = aim_x, aim_y
+        bot.aim_pitch = clamp(
+            math.atan2((target.z + 39.0) - (bot.z + SHOT_ORIGIN_HEIGHT), distance),
+            -0.48,
+            0.42,
+        )
         forward = 1.0 if distance > 270 else -0.55 if distance < 145 else 0.0
         strafe = math.sin(now * 1.7 + sum(bot.id.encode()) * 0.03) * 0.72
         bot.move_x, bot.move_y = movement_vector(
@@ -880,13 +909,8 @@ class Room:
             start_x, start_y = player.x + dx * 31, player.y + dy * 31
             maximum = float(spec["range"])
             wall_distance = maximum
-            shot_height = player.z + 48.0
-            for obstacle in self.arena["obstacles"]:
-                if shot_height > float(obstacle.get("height", 100)):
-                    continue
-                hit_distance = ray_rect_distance(start_x, start_y, dx, dy, obstacle, wall_distance)
-                if hit_distance is not None:
-                    wall_distance = hit_distance
+            shot_height = player.z + SHOT_ORIGIN_HEIGHT
+            vertical_slope = math.tan(player.aim_pitch)
             boundary_distances = []
             if dx > 1e-9:
                 boundary_distances.append((float(self.arena["width"]) - start_x) / dx)
@@ -897,9 +921,20 @@ class Room:
             elif dy < -1e-9:
                 boundary_distances.append((0 - start_y) / dy)
             wall_distance = min([wall_distance, *(value for value in boundary_distances if value >= 0)])
+            if vertical_slope < -1e-9:
+                wall_distance = min(wall_distance, max(0.0, -shot_height / vertical_slope))
+            for obstacle in self.arena["obstacles"]:
+                hit_distance = ray_rect_distance(start_x, start_y, dx, dy, obstacle, wall_distance)
+                if hit_distance is None:
+                    continue
+                height_at_wall = shot_height + vertical_slope * hit_distance
+                if 0.0 <= height_at_wall <= float(obstacle.get("height", 100)):
+                    wall_distance = hit_distance
 
             target: Player | None = None
             target_distance = wall_distance
+            target_zone = ""
+            target_height = shot_height + vertical_slope * wall_distance
             for candidate in self.players.values():
                 if candidate.id == player.id or not candidate.alive:
                     continue
@@ -913,10 +948,18 @@ class Room:
                 if perpendicular_sq > PLAYER_RADIUS * PLAYER_RADIUS:
                     continue
                 entry = projection - math.sqrt(max(0.0, PLAYER_RADIUS * PLAYER_RADIUS - perpendicular_sq))
+                impact_height = shot_height + vertical_slope * projection
+                relative_height = impact_height - candidate.z
+                if not (0.0 <= relative_height <= PLAYER_HEIGHT):
+                    continue
                 if 0 <= entry < target_distance:
-                    target, target_distance = candidate, entry
+                    target = candidate
+                    target_distance = entry
+                    target_height = shot_height + vertical_slope * entry
+                    target_zone = hit_zone(relative_height, math.sqrt(max(0.0, perpendicular_sq)))
 
             end_distance = target_distance
+            end_height = shot_height + vertical_slope * end_distance if target is None else target_height
             self.bullets.append(
                 Bullet(
                     secrets.token_hex(4),
@@ -929,12 +972,14 @@ class Room:
                     player.color,
                     now + 0.16,
                     hit=target is not None,
+                    hit_zone=target_zone,
+                    z2=end_height,
                 )
             )
             if target is not None:
-                # Weapon damage is deterministic for humans and bots alike:
-                # normal rounds remove 10 HP and heavy rounds remove 25 HP.
-                damage = float(spec["damage"])
+                # An unshielded headshot always removes the target's entire
+                # current health, including temporary bonus health.
+                damage = float(target.health if target_zone == "head" else HIT_ZONE_DAMAGE[target_zone])
                 if target.shield_until > now:
                     damage *= 0.25
                 damage = max(1, round(damage))
@@ -951,6 +996,7 @@ class Room:
             return
         player.last_explosive_at = now
         player.grenades -= 1
+        horizontal_speed = GRENADE_SPEED * math.cos(player.aim_pitch)
         self.projectiles.append(
             Projectile(
                 id=secrets.token_hex(5),
@@ -959,9 +1005,9 @@ class Room:
                 x=player.x + player.aim_x * 34,
                 y=player.y + player.aim_y * 34,
                 z=player.z + 48,
-                vx=player.aim_x * GRENADE_SPEED,
-                vy=player.aim_y * GRENADE_SPEED,
-                vz=GRENADE_LIFT,
+                vx=player.aim_x * horizontal_speed,
+                vy=player.aim_y * horizontal_speed,
+                vz=GRENADE_LIFT + math.sin(player.aim_pitch) * 260.0,
                 explodes_at=now + GRENADE_FUSE,
             )
         )
@@ -971,6 +1017,7 @@ class Room:
             return
         player.last_explosive_at = now
         player.rockets -= 1
+        horizontal_speed = RPG_SPEED * math.cos(player.aim_pitch)
         self.projectiles.append(
             Projectile(
                 id=secrets.token_hex(5),
@@ -979,9 +1026,9 @@ class Room:
                 x=player.x + player.aim_x * 38,
                 y=player.y + player.aim_y * 38,
                 z=player.z + 48,
-                vx=player.aim_x * RPG_SPEED,
-                vy=player.aim_y * RPG_SPEED,
-                vz=0.0,
+                vx=player.aim_x * horizontal_speed,
+                vy=player.aim_y * horizontal_speed,
+                vz=math.sin(player.aim_pitch) * RPG_SPEED,
                 explodes_at=now + 2.4,
             )
         )
@@ -1028,8 +1075,9 @@ class Room:
                         projectile.vx *= 0.82
                         projectile.vy *= 0.82
             else:
+                projectile.z += projectile.vz * dt
                 width, height = float(self.arena["width"]), float(self.arena["height"])
-                if not (0 <= projectile.x <= width and 0 <= projectile.y <= height):
+                if not (0 <= projectile.x <= width and 0 <= projectile.y <= height) or projectile.z < 0:
                     should_explode = True
                 if any(
                     projectile.z <= float(obstacle.get("height", 100))

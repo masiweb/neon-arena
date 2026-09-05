@@ -401,9 +401,11 @@
         const length = Math.hypot(dx, dz);
         if (length > 0.5) {
           const color = trace.hit ? "#fff29a" : (trace.color || "#fff");
-          const traceHeight = Number(trace.z) || 48;
+          const startHeight = Number(trace.z) || 48;
+          const endHeight = Number.isFinite(Number(trace.z2)) ? Number(trace.z2) : startHeight;
+          const traceHeight = (startHeight + endHeight) / 2;
           drawBox([(x1 + x2) / 2, traceHeight, (z1 + z2) / 2], [length, 1.35, 1.35], color, 2, Math.atan2(dz, dx));
-          drawBox([x2, traceHeight, z2], [trace.hit ? 5 : 2.5, trace.hit ? 5 : 2.5, trace.hit ? 5 : 2.5], color, 2, scene.now * 0.01);
+          drawBox([x2, endHeight, z2], [trace.hit ? 5 : 2.5, trace.hit ? 5 : 2.5, trace.hit ? 5 : 2.5], color, 2, scene.now * 0.01);
         }
       }
 

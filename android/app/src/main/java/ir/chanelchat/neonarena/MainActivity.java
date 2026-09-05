@@ -3,6 +3,7 @@ package ir.chanelchat.neonarena;
 import android.annotation.SuppressLint;
 import android.Manifest;
 import android.app.Activity;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.content.Intent;
@@ -15,6 +16,7 @@ import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.WebChromeClient;
+import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.WebResourceRequest;
 import android.webkit.RenderProcessGoneDetail;
@@ -51,10 +53,11 @@ public final class MainActivity extends Activity {
         settings.setSupportZoom(false);
         settings.setTextZoom(100);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " NeonArenaAndroid/3.0.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " NeonArenaAndroid/3.1.0");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             settings.setSafeBrowsingEnabled(true);
         }
+        gameView.addJavascriptInterface(new AndroidBridge(), "NeonAndroid");
 
         gameView.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -120,6 +123,19 @@ public final class MainActivity extends Activity {
         setContentView(gameView);
         gameView.post(this::hideSystemBars);
         gameView.loadUrl("file:///android_asset/index.html");
+    }
+
+    private final class AndroidBridge {
+        @JavascriptInterface
+        public void setOrientation(String mode) {
+            runOnUiThread(() -> {
+                int orientation = "landscape".equals(mode)
+                    ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    : ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT;
+                if (getRequestedOrientation() != orientation) setRequestedOrientation(orientation);
+                hideSystemBars();
+            });
+        }
     }
 
     @Override

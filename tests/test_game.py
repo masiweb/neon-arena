@@ -5,10 +5,10 @@ import unittest
 
 from server.game import (
     BOT_DIFFICULTIES,
+    HIT_ZONE_DAMAGE,
     JUMP_VELOCITY,
     OBSTACLES,
     STARTING_LIVES,
-    WEAPON_SPECS,
     GameHub,
     Player,
     Room,
@@ -45,7 +45,7 @@ class GameRulesTests(unittest.TestCase):
         target.x, target.y = 130, 350
         shooter.aim_x, shooter.aim_y = 1, 0
         room._fire(shooter, time.monotonic())
-        self.assertEqual(target.health, 90)
+        self.assertEqual(target.health, 75)
         self.assertEqual(len(room.bullets), 1)
         self.assertGreater(room.bullets[0].x2, room.bullets[0].x1)
         self.assertTrue(room.bullets[0].hit)
@@ -161,11 +161,13 @@ class GameRulesTests(unittest.TestCase):
             "seq": 42,
             "move": [0.5, 0.0],
             "aim": [1.0, 0.0],
+            "pitch": 0.2,
             "shooting": True,
         }))
         self.assertEqual(player.last_input_seq, 42)
         self.assertEqual(player.public(time.monotonic())["ack"], 42)
         self.assertEqual(player.move_x, 0.5)
+        self.assertEqual(player.aim_pitch, 0.2)
         self.assertTrue(player.shooting)
 
     def test_jump_action_and_landing_are_server_authoritative(self) -> None:
@@ -211,9 +213,8 @@ class GameRulesTests(unittest.TestCase):
         self.assertEqual(room.state(time.monotonic())["mapName"], MAPS["reactor"]["name"])
         self.assertEqual(set(BOT_DIFFICULTIES), {"easy", "normal", "hard"})
 
-    def test_weapon_damage_balance(self) -> None:
-        self.assertEqual(WEAPON_SPECS["base"]["damage"], 10)
-        self.assertEqual(WEAPON_SPECS["heavy"]["damage"], 25)
+    def test_hit_zone_damage_balance(self) -> None:
+        self.assertEqual(HIT_ZONE_DAMAGE, {"head": 100, "neck": 90, "body": 25, "limb": 10})
 
         room = Room("TEST")
         room.bot_difficulty = "hard"
@@ -225,11 +226,41 @@ class GameRulesTests(unittest.TestCase):
         bot.aim_x, bot.aim_y = 1, 0
         room.players = {bot.id: bot, target.id: target}
         room._fire(bot, time.monotonic())
-        self.assertEqual(target.health, 90)
+        self.assertEqual(target.health, 75)
         bot.weapon = "heavy"
         bot.last_shot = 0
         room._fire(bot, time.monotonic())
-        self.assertEqual(target.health, 65)
+        self.assertEqual(target.health, 50)
+
+    def test_server_classifies_head_neck_body_and_limb_hits(self) -> None:
+        expected = {"head": (60.0, 0), "neck": (53.0, 10), "body": (40.0, 75), "limb": (12.0, 90)}
+        for zone, (impact_height, remaining_health) in expected.items():
+            with self.subTest(zone=zone):
+                room = Room("TEST")
+                shooter = make_player("shooter")
+                target = make_player("target")
+                shooter.x, shooter.y = 50, 350
+                target.x, target.y = 180, 350
+                shooter.aim_x, shooter.aim_y = 1, 0
+                projection = target.x - (shooter.x + 31)
+                shooter.aim_pitch = math.atan2(impact_height - 48, projection)
+                room.players = {shooter.id: shooter, target.id: target}
+                room._fire(shooter, time.monotonic())
+                self.assertEqual(room.bullets[-1].hit_zone, zone)
+                self.assertEqual(room.bullets[-1].public()["hitZone"], zone)
+                self.assertIn("z2", room.bullets[-1].public())
+                self.assertEqual(target.health, remaining_health)
+
+        room = Room("TEST")
+        shooter = make_player("shooter")
+        target = make_player("boosted-target")
+        shooter.x, shooter.y = 50, 350
+        target.x, target.y, target.health = 180, 350, 140
+        shooter.aim_x, shooter.aim_y = 1, 0
+        shooter.aim_pitch = math.atan2(60 - 48, target.x - (shooter.x + 31))
+        room.players = {shooter.id: shooter, target.id: target}
+        room._fire(shooter, time.monotonic())
+        self.assertEqual(target.health, 0)
 
     def test_friendly_fire_is_disabled(self) -> None:
         room = Room("TEST")
@@ -245,7 +276,7 @@ class GameRulesTests(unittest.TestCase):
         room.players = {item.id: item for item in (shooter, teammate, enemy)}
         room._fire(shooter, time.monotonic())
         self.assertEqual(teammate.health, 100)
-        self.assertEqual(enemy.health, 90)
+        self.assertEqual(enemy.health, 75)
 
     def test_grenade_and_rpg_ammo_and_trajectory(self) -> None:
         room = Room("TEST")

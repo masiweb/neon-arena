@@ -85,7 +85,7 @@
   const wsOrigin = isAndroidApp
     ? androidServerOrigin.replace(/^https:/, "wss:")
     : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
-  const protocolVersion = "8";
+  const protocolVersion = "9";
   if (isAndroidApp) {
     $("downloadAndroid")?.classList.add("hidden");
     $("downloadAndroidLobby")?.classList.add("hidden");
@@ -137,6 +137,7 @@
     voiceStream: null,
     voicePeers: new Map(),
     voiceEnabled: false,
+    voiceMode: "off",
     iceServers: [],
   };
 
@@ -192,6 +193,14 @@
     $("authTabs").classList.toggle("hidden", !["login", "register"].includes(name));
     for (const button of document.querySelectorAll("[data-auth-view]")) button.classList.toggle("active", button.dataset.authView === name);
     entryError.textContent = "";
+    setAppOrientation("portrait");
+  }
+
+  function setAppOrientation(mode) {
+    const landscape = mode === "landscape";
+    try { window.NeonAndroid?.setOrientation?.(mode); } catch { /* Web fallback below. */ }
+    const requested = screen.orientation?.lock?.(landscape ? "landscape" : "portrait");
+    if (requested?.catch) requested.catch(() => {});
   }
 
   function setSession(data) {
@@ -212,7 +221,8 @@
     closeVoice();
     lobbyScreen.classList.add("hidden");
     gameScreen.classList.add("hidden");
-    document.body.classList.remove("in-game");
+    document.body.classList.remove("in-game", "in-lobby");
+    setAppOrientation("portrait");
     if (showLogin) {
       entryScreen.classList.remove("hidden");
       showAuthView("login");
@@ -227,19 +237,16 @@
     $("profileRank").textContent = user.rank?.name || "تازه‌کار";
     $("goldBalance").textContent = fa.format(user.gold || 0);
     $("diamondBalance").textContent = fa.format(user.diamonds || 0);
-    $("careerXp").textContent = `${fa.format(user.xp || 0)} XP`;
-    $("careerRating").textContent = fa.format(user.rating || 1000);
-    $("careerWins").textContent = fa.format(user.wins || 0);
-    $("careerKills").textContent = fa.format(user.kills || 0);
     $("personalInvite").value = app.inviteUrl;
     $("adminLink").classList.toggle("hidden", !user.isAdmin);
     $("adminLink").href = `${httpOrigin}/admin`;
-    $("voiceMode").value = user.team ? "team" : "room";
-    $("voiceMode").querySelector('option[value="team"]').disabled = !user.team;
+    $("voiceTeamOption").disabled = !user.team;
     entryScreen.classList.add("hidden");
     gameScreen.classList.add("hidden");
     lobbyScreen.classList.remove("hidden");
     document.body.classList.remove("in-game");
+    document.body.classList.add("in-lobby");
+    setAppOrientation("landscape");
     loadAds("lobby");
   }
 
@@ -367,12 +374,14 @@
       app.botDifficulties = message.botDifficulties || [];
       applyArena(message.arena);
       populateLobbyOptions();
-      roomBadge.textContent = `اتاق: ${message.room}`;
+      roomBadge.textContent = `اتاق ${message.room}`;
       history.replaceState(null, "", `?room=${message.room}`);
       entryScreen.classList.add("hidden");
       lobbyScreen.classList.add("hidden");
       gameScreen.classList.remove("hidden");
+      document.body.classList.remove("in-lobby");
       document.body.classList.add("in-game");
+      setAppOrientation("landscape");
       requestAnimationFrame(fit);
       requestFullscreenSoft();
       return;
@@ -435,12 +444,14 @@
     app.lastAck = Math.max(app.lastAck, me.ack || 0);
     healthFill.style.width = `${Math.min(100, me.health)}%`;
     healthFill.style.background = me.health > 100 ? "linear-gradient(90deg,#66cf22,#b8ff38)" : me.health < 35 ? "linear-gradient(90deg,#ff3858,#ff7b75)" : "linear-gradient(90deg,#0ba6ff,#39f1ff)";
-    healthText.textContent = fa.format(me.health);
+    healthText.textContent = `${fa.format(me.health)}٪`;
     lives.innerHTML = Array.from({ length: 3 }, (_, index) => `<i class="${index < me.lives ? "" : "lost"}">♥</i>`).join("");
     myScore.textContent = fa.format(me.score);
     weaponBadge.textContent = `سلاح: ${weaponNames[me.weapon] || weaponNames.base}${me.speedBoost ? " · سرعت+" : ""}${me.radarHidden ? " · اختفا" : ""}`;
     $("grenadeCount").textContent = fa.format(me.grenades || 0);
     $("rpgCount").textContent = fa.format(me.rockets || 0);
+    grenadeButton.classList.toggle("hidden", !(me.grenades > 0));
+    rpgButton.classList.toggle("hidden", !(me.rockets > 0));
     grenadeButton.disabled = !me.alive || state.phase !== "playing" || !(me.grenades > 0);
     rpgButton.disabled = !me.alive || state.phase !== "playing" || !(me.rockets > 0);
     mapBadge.textContent = `نقشه: ${state.mapName || app.arena.name || "نئون"}`;
@@ -463,8 +474,6 @@
     if (state.phase !== "ended") $("resultAd").classList.add("hidden");
     updateScores(state.players);
     updateCenterMessage();
-    updateCooldown($("dashButton"), $("dashCooldown"), me.dashCooldown, 4);
-    updateCooldown($("shieldButton"), $("shieldCooldown"), me.shieldCooldown, 7);
     jumpButton.disabled = !me.grounded || state.phase !== "playing" || !me.alive;
     jumpButton.classList.toggle("cooling", jumpButton.disabled);
 
@@ -475,7 +484,7 @@
           app.effects.push({ type: "muzzle", born: performance.now(), x: bullet.x1 ?? bullet.x, y: bullet.y1 ?? bullet.y, color: bullet.color });
           if (bullet.owner === app.playerId) {
             acknowledgePredictedBullet(bullet);
-            if (bullet.hit) showHitConfirmation();
+            if (bullet.hit) showHitConfirmation(bullet.hitZone);
           }
           else {
             const shooter = state.players.find((player) => player.id === bullet.owner);
@@ -492,14 +501,23 @@
     }
   }
 
-  function showHitConfirmation() {
+  function showHitConfirmation(hitZone = "body") {
     crosshair?.classList.remove("hit");
     void crosshair?.offsetWidth;
     crosshair?.classList.add("hit");
     clearTimeout(showHitConfirmation.timer);
     showHitConfirmation.timer = setTimeout(() => crosshair?.classList.remove("hit"), 130);
     navigator.vibrate?.(14);
-    playHit();
+    if (hitZone === "head") {
+      const banner = $("headshotBanner");
+      banner.classList.remove("show");
+      void banner.offsetWidth;
+      banner.classList.add("show");
+      playHeadshot();
+      navigator.vibrate?.([24, 30, 42]);
+    } else {
+      playHit(hitZone);
+    }
   }
 
   function updateScores(players) {
@@ -518,7 +536,7 @@
     const state = app.state;
     const me = state.players.find((player) => player.id === app.playerId);
     startRound.classList.add("hidden");
-    $("resetRound").classList.add("hidden");
+    $("resetRoundMenu").classList.toggle("hidden", app.playerId !== state.hostId);
     botControls.classList.add("hidden");
     lobbySettings.classList.add("hidden");
     weaponChooser.classList.add("hidden");
@@ -533,7 +551,6 @@
       centerMessage.querySelector("span").textContent = state.winnerChoice ? `جایزه برنده: ${weaponNames[state.winnerChoice]}` : app.playerId === state.hostId ? "هر بازیکن سه جان دارد؛ وقتی همه آماده شدند شروع کنید" : "سازنده اتاق بازی را شروع می‌کند";
       if (app.playerId === state.hostId && (!state.winnerId || state.winnerChoice)) startRound.classList.remove("hidden");
       if (app.playerId === state.hostId) {
-        $("resetRound").classList.remove("hidden");
         const bots = state.players.filter((player) => player.bot).length;
         $("botCount").textContent = `${fa.format(bots)} بات`;
         $("removeBot").disabled = bots === 0;
@@ -549,20 +566,12 @@
     } else if (state.phase === "ended") {
       centerMessage.querySelector("strong").textContent = `${state.winner} برنده شد!`;
       centerMessage.querySelector("span").textContent = state.winnerChoice ? `سلاح ${weaponNames[state.winnerChoice]} برای برنده انتخاب شد` : "برنده در حال انتخاب سلاح جایزه است";
-      if (app.playerId === state.hostId) $("resetRound").classList.remove("hidden");
     } else if (state.phase === "playing" && me?.lives === 0) {
       centerMessage.querySelector("strong").textContent = "جان‌هایت تمام شد";
       centerMessage.querySelector("span").textContent = "تا پایان راند بازی را تماشا کن";
     } else {
       centerMessage.classList.add("off");
     }
-  }
-
-  function updateCooldown(button, fill, value, total) {
-    const active = value > 0;
-    button.classList.toggle("cooling", active);
-    button.disabled = active;
-    fill.style.height = `${Math.min(100, value / total * 100)}%`;
   }
 
   function send(payload) {
@@ -613,7 +622,7 @@
 
   setupPad($("movePad"), (x, y, distance) => {
     const rawStrength = Math.min(1, distance);
-    const strength = rawStrength < .12 ? 0 : (rawStrength - .12) / .88;
+    const strength = rawStrength < .055 ? 0 : Math.pow((rawStrength - .055) / .945, .82);
     const directionLength = Math.hypot(x, y) || 1;
     app.padMove = [x / directionLength * strength, y / directionLength * strength];
   }, () => { app.padMove = [0, 0]; });
@@ -628,9 +637,10 @@
   function rotateCamera(dx, dy, pointerType) {
     const mouse = pointerType === "mouse";
     const yawSensitivity = mouse ? .00215 : .00405;
-    const pitchSensitivity = mouse ? .00175 : .00315;
-    app.cameraAngle += Math.max(-90, Math.min(90, dx)) * yawSensitivity;
-    app.cameraPitch = Math.max(-.48, Math.min(.42, app.cameraPitch - Math.max(-70, Math.min(70, dy)) * pitchSensitivity));
+    const pitchSensitivity = mouse ? .0017 : .00275;
+    const maxDelta = mouse ? 90 : 52;
+    app.cameraAngle += Math.max(-maxDelta, Math.min(maxDelta, dx)) * (mouse ? yawSensitivity : .00325);
+    app.cameraPitch = Math.max(-.48, Math.min(.42, app.cameraPitch - Math.max(-48, Math.min(48, dy)) * pitchSensitivity));
   }
 
   lookSurface.addEventListener("pointerdown", (event) => {
@@ -857,10 +867,28 @@
     }
   }
 
-  function playHit() {
+  function playHit(hitZone = "body") {
     if (!app.audioContext || app.audioMuted) return;
-    tone(720, .06, .035, "triangle", 0, "effects", 1080);
-    tone(1180, .045, .022, "sine", .028, "effects", 820);
+    const strong = hitZone === "neck";
+    tone(strong ? 560 : 720, .06, strong ? .05 : .035, "triangle", 0, "effects", strong ? 1240 : 1080);
+    tone(1180, .045, strong ? .032 : .022, "sine", .028, "effects", 820);
+  }
+
+  function playHeadshot() {
+    ensureAudio();
+    if (!app.audioContext || app.audioMuted) return;
+    tone(1280, .08, .07, "square", 0, "effects", 520);
+    tone(1880, .12, .055, "triangle", .045, "effects", 880);
+    noiseBurst(.09, .045, 5200, 0, "effects");
+    if ("speechSynthesis" in window && typeof SpeechSynthesisUtterance === "function") {
+      const callout = new SpeechSynthesisUtterance("Headshot");
+      callout.lang = "en-US";
+      callout.rate = 1.18;
+      callout.pitch = 0.82;
+      callout.volume = 0.62;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(callout);
+    }
   }
 
   function playJump() {
@@ -893,7 +921,7 @@
       const dx = Math.cos(angle);
       const dy = Math.sin(angle);
       const shotHeight = (rendered.z || 0) + 48;
-      const end = traceEnd(rendered.x + dx * 31, rendered.y + dy * 31, dx, dy, 920, shotHeight);
+      const end = traceEnd(rendered.x + dx * 31, rendered.y + dy * 31, dx, dy, 920, shotHeight, app.cameraPitch);
       app.localBullets.push({
         id: `local-${now}-${spread}`,
         x1: rendered.x + dx * 31,
@@ -901,6 +929,7 @@
         x2: end[0],
         y2: end[1],
         z: shotHeight,
+        z2: end[2],
         radius: spec.radius,
         color: me.color,
         born: now,
@@ -910,14 +939,15 @@
     playShot(true, me.weapon);
   }
 
-  function traceEnd(x, y, dx, dy, range, shotHeight = 48) {
+  function traceEnd(x, y, dx, dy, range, shotHeight = 48, pitch = 0) {
     let distance = 0;
     while (distance < range) {
       distance += 8;
       const px = x + dx * distance, py = y + dy * distance;
-      if (px <= 0 || py <= 0 || px >= app.arena.width || py >= app.arena.height || wallAt(px, py, shotHeight) >= 0) return [px, py];
+      const height = shotHeight + Math.tan(pitch) * distance;
+      if (height < 0 || px <= 0 || py <= 0 || px >= app.arena.width || py >= app.arena.height || wallAt(px, py, height) >= 0) return [px, py, height];
     }
-    return [x + dx * range, y + dy * range];
+    return [x + dx * range, y + dy * range, shotHeight + Math.tan(pitch) * range];
   }
 
   function acknowledgePredictedBullet(serverBullet) {
@@ -936,7 +966,8 @@
   function toggleSound() {
     app.audioMuted = !app.audioMuted;
     localStorage.setItem("neon-muted", app.audioMuted ? "1" : "0");
-    $("soundToggle").textContent = app.audioMuted ? "×♪" : "♪";
+    $("soundToggle").textContent = app.audioMuted ? "🔇" : "🔊";
+    $("soundToggle").classList.toggle("active", !app.audioMuted);
     if (app.audioMuted) app.audioContext?.suspend().catch(() => {});
     else ensureAudio();
   }
@@ -1111,15 +1142,37 @@
     }
   }
 
-  async function toggleVoice() {
-    if (app.voiceEnabled) return closeVoice();
+  function updateVoiceUi() {
+    const button = $("voiceMenuToggle");
+    button.textContent = app.voiceEnabled ? "🎙" : "🔇";
+    button.classList.toggle("active", app.voiceEnabled);
+    for (const option of document.querySelectorAll("[data-voice-mode]")) {
+      option.classList.toggle("active", option.dataset.voiceMode === app.voiceMode);
+    }
+  }
+
+  async function setVoiceMode(mode) {
+    if (mode === "off") {
+      closeVoice();
+      $("voiceMenu").classList.add("hidden");
+      notify("میکروفون قطع شد");
+      return;
+    }
+    if (mode === "team" && !app.teamId) {
+      notify("برای گفت‌وگوی تیمی ابتدا عضو تیم شوید");
+      return;
+    }
     try {
-      app.voiceStream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true }, video:false });
+      if (!app.voiceStream) app.voiceStream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true }, video:false });
+      if (app.voiceEnabled && app.voiceMode !== mode) {
+        for (const id of [...app.voicePeers.keys()]) removeVoicePeer(id);
+      }
       app.voiceEnabled = true;
-      $("voiceToggle").textContent = "🎙 صدای روشن";
-      $("voiceToggle").classList.add("active");
-      send({ type:"voice_join", mode:$("voiceMode").value });
-      notify("گفت‌وگوی صوتی فعال شد");
+      app.voiceMode = mode;
+      updateVoiceUi();
+      send({ type:"voice_join", mode });
+      $("voiceMenu").classList.add("hidden");
+      notify(mode === "team" ? "فقط اعضای تیم صدایت را می‌شنوند" : "همه افراد اتاق صدایت را می‌شنوند");
     } catch { notify("اجازه میکروفون داده نشد"); }
   }
 
@@ -1129,8 +1182,8 @@
     app.voiceStream?.getTracks().forEach((track) => track.stop());
     app.voiceStream = null;
     for (const id of [...app.voicePeers.keys()]) removeVoicePeer(id);
-    $("voiceToggle").textContent = "🎙 صدای خاموش";
-    $("voiceToggle").classList.remove("active");
+    app.voiceMode = "off";
+    updateVoiceUi();
   }
 
   for (const button of document.querySelectorAll("[data-auth-view]")) button.addEventListener("click", () => showAuthView(button.dataset.authView));
@@ -1183,7 +1236,10 @@
   roomCode.addEventListener("input", () => { roomCode.value = roomCode.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 4); });
   roomCode.addEventListener("keydown", (event) => { if (event.key === "Enter") joinRoom(); });
   startRound.addEventListener("click", () => send({ type: "start" }));
-  $("resetRound").addEventListener("click", () => { if (confirm("مسابقه فعلی از اول شروع شود؟")) send({ type:"reset" }); });
+  $("resetRoundMenu").addEventListener("click", () => {
+    $("gameMenu").classList.add("hidden");
+    if (confirm("مسابقه فعلی از اول شروع شود؟")) send({ type:"reset" });
+  });
   $("addBot").addEventListener("click", () => send({ type: "add_bot" }));
   $("removeBot").addEventListener("click", () => send({ type: "remove_bot" }));
   mapSelect.addEventListener("change", () => send({ type: "select_map", map: mapSelect.value }));
@@ -1192,22 +1248,37 @@
     const button = event.target.closest("[data-weapon]");
     if (button) send({ type: "choose_weapon", weapon: button.dataset.weapon });
   });
-  $("dashButton").addEventListener("pointerdown", () => action("dash"));
-  $("shieldButton").addEventListener("pointerdown", () => action("shield"));
   jumpButton.addEventListener("pointerdown", () => action("jump"));
   grenadeButton.addEventListener("pointerdown", () => action("grenade"));
   rpgButton.addEventListener("pointerdown", () => action("rpg"));
-  $("voiceToggle").addEventListener("click", toggleVoice);
-  $("voiceMode").addEventListener("change", () => { if (app.voiceEnabled) { for (const id of [...app.voicePeers.keys()]) removeVoicePeer(id); send({ type:"voice_join", mode:$("voiceMode").value }); } });
+  $("voiceMenuToggle").addEventListener("click", (event) => {
+    event.stopPropagation();
+    $("gameMenu").classList.add("hidden");
+    $("voiceMenu").classList.toggle("hidden");
+  });
+  $("gameMenuToggle").addEventListener("click", (event) => {
+    event.stopPropagation();
+    $("voiceMenu").classList.add("hidden");
+    $("gameMenu").classList.toggle("hidden");
+  });
+  $("voiceMenu").addEventListener("click", (event) => {
+    const option = event.target.closest("[data-voice-mode]");
+    if (option && !option.disabled) setVoiceMode(option.dataset.voiceMode);
+  });
   $("leaveRoom").addEventListener("click", async () => { try { await api(`/api/rooms/${app.room}/leave`, { method:"POST" }); } catch {} app.socket?.close(1000); });
-  $("fullscreen").addEventListener("click", toggleFullscreen);
   $("soundToggle").addEventListener("click", toggleSound);
-  $("soundToggle").textContent = app.audioMuted ? "×♪" : "♪";
-  $("scoreToggle").addEventListener("click", () => scoreboard.classList.toggle("open"));
+  $("soundToggle").textContent = app.audioMuted ? "🔇" : "🔊";
+  $("soundToggle").classList.toggle("active", !app.audioMuted);
+  updateVoiceUi();
+  $("scoreToggle").addEventListener("click", () => {
+    $("gameMenu").classList.add("hidden");
+    $("voiceMenu").classList.add("hidden");
+    scoreboard.classList.toggle("open");
+  });
   $("closeScore").addEventListener("click", () => scoreboard.classList.remove("open"));
-  $("copyInvite").addEventListener("click", async () => {
-    const url = `${httpOrigin}/?room=${app.room}`;
-    copyText(url, "لینک دعوت اتاق کپی شد");
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest?.("#gameMenu,#gameMenuToggle")) $("gameMenu").classList.add("hidden");
+    if (!event.target.closest?.("#voiceMenu,#voiceMenuToggle")) $("voiceMenu").classList.add("hidden");
   });
 
   bootstrap();
@@ -1234,7 +1305,7 @@
     fireButton.classList.remove("active");
     app.keys.clear();
     app.inputSeq += 1;
-    send({ type: "input", seq: app.inputSeq, move: [0, 0], aim: app.aim, shooting: false });
+    send({ type: "input", seq: app.inputSeq, move: [0, 0], aim: app.aim, pitch: app.cameraPitch, shooting: false });
   }
   window.addEventListener("blur", releaseInput);
   document.addEventListener("visibilitychange", () => { if (document.hidden) releaseInput(); });
@@ -1254,7 +1325,7 @@
     const strafe = local[0];
     app.move = [Math.cos(heading) * forward - Math.sin(heading) * strafe, Math.sin(heading) * forward + Math.cos(heading) * strafe];
     app.inputSeq += 1;
-    send({ type: "input", seq: app.inputSeq, move: app.move, aim: app.aim, shooting: app.shooting });
+    send({ type: "input", seq: app.inputSeq, move: app.move, aim: app.aim, pitch: app.cameraPitch, shooting: app.shooting });
   }
   setInterval(sampleAndSendInput, 20);
 
@@ -1591,17 +1662,17 @@
       const nextY = Math.max(21, Math.min(app.arena.height - 21, rendered.y + app.move[1] * speed * dt));
       if (isClearLocal(rendered.x, nextY, rendered.z)) rendered.y = nextY;
       const error = Math.hypot(player.x - rendered.x, player.y - rendered.y);
-      if (error > 70) {
+      if (error > 160) {
         rendered.x = player.x;
         rendered.y = player.y;
-      } else if (error > 9) {
+      } else if (error > 4) {
         const moving = Math.hypot(app.move[0], app.move[1]) > .05;
-        const correction = 1 - Math.exp(-(moving ? 2.2 : 11) * dt);
+        const correction = 1 - Math.exp(-(moving ? 4.2 : 14) * dt);
         rendered.x += (player.x - rendered.x) * correction;
         rendered.y += (player.y - rendered.y) * correction;
       }
     } else {
-      const interpolation = 1 - Math.exp(-18 * dt);
+      const interpolation = 1 - Math.exp(-23 * dt);
       rendered.x += (player.x - rendered.x) * interpolation;
       rendered.y += (player.y - rendered.y) * interpolation;
     }

@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>نبرد نئون</title>
-    <link rel="stylesheet" href="/static/styles.css?v=3.0.0" />
+    <link rel="stylesheet" href="/static/styles.css?v=3.1.0" />
   </head>
   <body>
     <div id="rotateNotice" class="rotate-notice" aria-live="polite">
@@ -22,11 +22,8 @@
           <section class="landing-hero">
             <div class="brand-line"><div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div><b>NEON ARENA</b></div>
             <p class="eyebrow">نبرد آنلاین اول‌شخص</p>
-            <h1>وارد <span>میدان نئون</span> شو</h1>
-            <p class="hero-copy">تیمت را بساز، دوستانت را دعوت کن و با سه جان تا آخرین نفر بجنگ.</p>
-            <div class="feature-grid">
-              <div><b>۶</b><span>عضو در هر تیم</span></div><div><b>۶</b><span>نقشه بزرگ</span></div><div><b>۱۲</b><span>بازیکن در اتاق</span></div>
-            </div>
+            <h1>نبرد <span>نئون</span></h1>
+            <p class="hero-copy">وارد حساب خودت شو و مستقیم به میدان نبرد برو.</p>
             <div id="loginAd" class="ad-slot hidden"></div>
           </section>
 
@@ -55,7 +52,7 @@
               <label>رمز جدید<input id="resetPassword" class="text-input" type="password" dir="ltr" autocomplete="new-password" required minlength="8" maxlength="128" /></label><button class="button primary wide" type="submit">ذخیره رمز جدید</button>
             </form>
             <div id="entryError" class="entry-error" role="alert"></div>
-            <a id="downloadAndroid" class="android-download" href="/static/neon-arena-android-latest.apk" download><b>↓ دانلود آخرین نسخه اندروید</b><span>نسخه ۳.۰.۰ · مناسب Android 7 به بالا</span></a>
+            <a id="downloadAndroid" class="android-download" href="/static/neon-arena-android-latest.apk" download><b>↓ دانلود آخرین نسخه اندروید</b><span>نسخه ۳.۱.۰ · مناسب Android 7 به بالا</span></a>
           </section>
         </div>
       </section>
@@ -78,8 +75,7 @@
             <button class="dashboard-card gold" type="button" data-panel="shop"><i>◆</i><b>فروشگاه</b><span>بسته‌های طلا و الماس</span></button>
             <button class="dashboard-card pink" type="button" data-panel="ranking"><i>♛</i><b>رده‌بندی</b><span>برترین مبارزان فصل</span></button>
           </section>
-          <section class="invite-card"><div><p class="eyebrow">جایزه دعوت</p><h3>دوستانت را به نبرد بیاور</h3><p>برای هر ثبت‌نام موفق، تو و دوستت هر کدام ۱۰۰ طلا می‌گیرید.</p></div><div class="copy-row"><input id="personalInvite" class="text-input" readonly dir="ltr" /><button id="copyPersonalInvite" class="button secondary" type="button">کپی لینک</button></div></section>
-          <section class="career-card"><div><span>امتیاز تجربه</span><b id="careerXp">۰ XP</b></div><div><span>رنک رقابتی</span><b id="careerRating">۱۰۰۰</b></div><div><span>برد</span><b id="careerWins">۰</b></div><div><span>حذف دشمن</span><b id="careerKills">۰</b></div></section>
+          <section class="invite-card"><div><p class="eyebrow">دعوت دوستان</p><h3>دوستانت را دعوت کن</h3><p class="invite-reward">🪙 <b>+۱۰۰ طلا</b> برای هر ثبت‌نام موفق</p></div><div class="copy-row"><input id="personalInvite" class="text-input" readonly dir="ltr" aria-label="لینک دعوت" /><button id="copyPersonalInvite" class="button secondary" type="button">کپی</button></div></section>
         </div>
         <a id="downloadAndroidLobby" class="floating-download" href="/static/neon-arena-android-latest.apk" download>↓ آخرین APK</a>
       </section>
@@ -90,15 +86,22 @@
         <canvas id="arena"></canvas><div id="lookSurface" class="look-surface" aria-label="برای چرخاندن دوربین انگشت را بکشید"></div>
         <div class="desktop-help">کلیک روی بازی: قفل موس · WASD: حرکت · کلیک چپ: شلیک · Space: پرش · G: نارنجک · R: RPG · Shift: شتاب · E: سپر</div>
         <canvas id="minimap" aria-label="نقشه محیط و بازیکنان"></canvas><div class="crosshair" aria-hidden="true"><i></i><i></i></div><div id="damageFlash" class="damage-flash" aria-hidden="true"></div>
-        <header class="hud-top"><div class="health-box hud-card"><span id="lives" class="lives">♥♥♥</span><div class="health-track"><i id="healthFill"></i></div><b id="healthText">۱۰۰</b></div><div class="round-box hud-card"><span id="phaseLabel">انتظار</span><strong id="timer">۰۲:۰۰</strong></div><button id="scoreToggle" class="score-button hud-card" type="button"><span>رتبه</span><strong id="myScore">۰</strong></button></header>
+        <header class="hud-top">
+          <div class="health-box hud-card"><span id="lives" class="lives">♥♥♥</span><div class="health-track"><i id="healthFill"></i></div><b id="healthText">۱۰۰٪</b></div>
+          <div class="match-info hud-card"><span id="roomBadge">اتاق ----</span><div><small id="phaseLabel">انتظار</small><strong id="timer">۰۲:۰۰</strong></div></div>
+          <div class="hud-actions"><button id="scoreToggle" class="score-button hud-card" type="button"><span>رتبه</span><strong id="myScore">۰</strong></button><button id="voiceMenuToggle" class="hud-icon hud-card" type="button" aria-label="میکروفون" title="میکروفون">🎙</button><button id="gameMenuToggle" class="hud-icon hud-card" type="button" aria-label="منوی بازی" title="منوی بازی">☰</button></div>
+        </header>
         <aside id="scoreboard" class="scoreboard hud-card"><div class="score-head"><strong>جدول امتیاز</strong><button id="closeScore" type="button">×</button></div><ol id="scoreList"></ol></aside>
-        <div class="room-tools"><button id="copyInvite" class="mini-button" type="button">دعوت دوستان</button><button id="leaveRoom" class="mini-button danger" type="button">خروج از اتاق</button><button id="voiceToggle" class="mini-button" type="button">🎙 صدای خاموش</button><select id="voiceMode" class="mini-select"><option value="team">فقط تیم</option><option value="room">کل اتاق</option></select><button id="fullscreen" class="mini-button icon-only" type="button">⛶</button><button id="soundToggle" class="mini-button icon-only" type="button">♪</button><span id="roomBadge">اتاق: ----</span><span id="mapBadge">نقشه: دژ نئون</span><span id="weaponBadge" class="weapon-badge">سلاح: معمولی</span></div>
-        <div id="centerMessage" class="center-message"><strong>منتظر بازیکن‌ها</strong><span>لینک اتاق را برای دوستان بفرستید</span><div id="resultAd" class="ad-slot hidden"></div><div id="lobbySettings" class="lobby-settings hidden"><label>نقشه<select id="mapSelect"></select></label><label>قدرت و دقت بات<select id="botDifficulty"></select></label></div><div class="center-actions"><button id="startRound" class="button primary hidden" type="button">شروع بازی</button><button id="resetRound" class="button danger hidden" type="button">ریست مسابقه</button></div><div id="botControls" class="bot-controls hidden"><button id="removeBot" type="button">− حذف بات</button><span id="botCount">۰ بات</span><button id="addBot" type="button">＋ افزودن بات</button></div><div id="weaponChooser" class="weapon-chooser hidden"><button type="button" data-weapon="heavy"><b>توپ سنگین</b><small>قدرت تخریب بالا</small></button><button type="button" data-weapon="rapid"><b>رگبار سریع</b><small>سرعت شلیک بالا</small></button><button type="button" data-weapon="spread"><b>سه‌تیر</b><small>پوشش بیشتر</small></button></div></div>
+        <div id="gameMenu" class="hud-popover game-menu hidden"><button id="soundToggle" class="sound-item" type="button" aria-label="قطع یا وصل صدای بازی" title="قطع یا وصل صدای بازی">🔊</button><button id="leaveRoom" class="danger" type="button">خروج از اتاق</button><button id="resetRoundMenu" class="danger hidden" type="button">ریست مسابقه</button></div>
+        <div id="voiceMenu" class="hud-popover voice-menu hidden"><button type="button" data-voice-mode="off">🔇 قطع</button><button type="button" data-voice-mode="room">🎙 همه</button><button id="voiceTeamOption" type="button" data-voice-mode="team">◈ تیم</button></div>
+        <div class="game-status"><span id="mapBadge">دژ نئون</span><span id="weaponBadge" class="weapon-badge">معمولی</span></div>
+        <div id="headshotBanner" class="headshot-banner" aria-live="assertive">HEADSHOT</div>
+        <div id="centerMessage" class="center-message"><strong>منتظر بازیکن‌ها</strong><span>سازنده اتاق بازی را شروع می‌کند</span><div id="resultAd" class="ad-slot hidden"></div><div id="lobbySettings" class="lobby-settings hidden"><label>نقشه<select id="mapSelect"></select></label><label>قدرت و دقت بات<select id="botDifficulty"></select></label></div><div class="center-actions"><button id="startRound" class="button primary hidden" type="button">شروع بازی</button></div><div id="botControls" class="bot-controls hidden"><button id="removeBot" type="button">− حذف بات</button><span id="botCount">۰ بات</span><button id="addBot" type="button">＋ افزودن بات</button></div><div id="weaponChooser" class="weapon-chooser hidden"><button type="button" data-weapon="heavy"><b>توپ سنگین</b><small>قدرت تخریب بالا</small></button><button type="button" data-weapon="rapid"><b>رگبار سریع</b><small>سرعت شلیک بالا</small></button><button type="button" data-weapon="spread"><b>سه‌تیر</b><small>پوشش بیشتر</small></button></div></div>
         <div id="toast" class="toast" aria-live="polite"></div><div id="movePad" class="touch-pad move-pad"><div class="pad-ring"><i class="pad-knob"></i></div></div>
-        <div class="explosive-controls"><button id="grenadeButton" class="explosive grenade" type="button"><span>●</span><b>نارنجک</b><em id="grenadeCount">۰</em></button><button id="rpgButton" class="explosive rpg" type="button"><span>➤</span><b>RPG</b><em id="rpgCount">۰</em></button></div>
-        <div class="right-controls"><div class="ability-row"><button id="jumpButton" class="ability jump" type="button"><span>↥</span><b>پرش</b></button><button id="shieldButton" class="ability shield" type="button"><span>◇</span><i id="shieldCooldown"></i></button><button id="dashButton" class="ability dash" type="button"><span>»</span><i id="dashCooldown"></i></button></div><button id="fireButton" class="fire-button" type="button"><span>●</span><b>شلیک</b></button></div>
+        <div class="explosive-controls"><button id="grenadeButton" class="explosive grenade hidden" type="button" aria-label="پرتاب نارنجک" title="نارنجک"><span>●</span><em id="grenadeCount">۰</em></button><button id="rpgButton" class="explosive rpg hidden" type="button" aria-label="شلیک RPG" title="RPG"><span>➤</span><em id="rpgCount">۰</em></button></div>
+        <div class="right-controls"><div class="ability-row"><button id="jumpButton" class="ability jump" type="button" aria-label="پرش" title="پرش"><span>↥</span></button></div><button id="fireButton" class="fire-button" type="button"><span>●</span><b>شلیک</b></button></div>
       </section>
     </main>
-    <script src="/static/renderer3d.js?v=3.0.0"></script><script src="/static/game.js?v=3.0.0" defer></script>
+    <script src="/static/renderer3d.js?v=3.1.0"></script><script src="/static/game.js?v=3.1.0" defer></script>
   </body>
 </html>
