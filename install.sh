@@ -11,6 +11,7 @@ BUILD_ANDROID=1
 GRADLE_VERSION="8.7"
 ANDROID_CLI_VERSION="15859902"
 ANDROID_CLI_SHA256="4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583"
+ANDROID_CLI_URL="https://redirector.gvt1.com/edgedl/android/repository/commandlinetools-linux-${ANDROID_CLI_VERSION}_latest.zip"
 ANDROID_SDK_ROOT="/opt/android-sdk"
 BUILD_TMP=""
 STAGE_DIR=""
@@ -189,8 +190,12 @@ if [[ "${BUILD_ANDROID}" -eq 1 ]]; then
 
   if [[ ! -x "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/android" ]]; then
     install -d "${ANDROID_SDK_ROOT}/cmdline-tools"
-    wget -q --show-progress -O "${BUILD_TMP}/commandlinetools.zip" \
-      "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CLI_VERSION}_latest.zip"
+    # Google's dl.google.com edge returns a false 404 from some cloud regions;
+    # redirector.gvt1.com is the official download endpoint used by the Android
+    # download page and works consistently on fresh VPS installations.
+    curl --fail --location --retry 5 --retry-delay 2 --retry-all-errors \
+      --connect-timeout 30 --output "${BUILD_TMP}/commandlinetools.zip" \
+      "${ANDROID_CLI_URL}"
     echo "${ANDROID_CLI_SHA256}  ${BUILD_TMP}/commandlinetools.zip" | sha256sum -c -
     unzip -q "${BUILD_TMP}/commandlinetools.zip" -d "${BUILD_TMP}/commandlinetools"
     if [[ -d "${ANDROID_SDK_ROOT}/cmdline-tools/latest" ]]; then
