@@ -9,10 +9,8 @@ PUBLIC_ORIGIN=""
 ENABLE_SSL=0
 BUILD_ANDROID=1
 GRADLE_VERSION="8.7"
-ANDROID_CLI_VERSION="15859902"
-ANDROID_CLI_SHA256="4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583"
-ANDROID_CLI_URL="https://redirector.gvt1.com/edgedl/android/repository/commandlinetools-linux-${ANDROID_CLI_VERSION}_latest.zip"
 ANDROID_SDK_ROOT="/opt/android-sdk"
+ANDROID_REPOSITORY_URL="https://redirector.gvt1.com/edgedl/android/repository"
 BUILD_TMP=""
 STAGE_DIR=""
 
@@ -46,6 +44,38 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+
+install_android_component() {
+  local archive_name="$1"
+  local target_dir="$2"
+  local marker_name="$3"
+  local archive_path extract_dir marker_path source_dir
+
+  if [[ -f "${target_dir}/${marker_name}" ]]; then
+    echo "Android SDK component already installed: ${target_dir}"
+    return
+  fi
+
+  archive_path="${BUILD_TMP}/${archive_name}"
+  extract_dir="${BUILD_TMP}/extract-${archive_name%.zip}"
+  echo "Downloading Android SDK component: ${archive_name}"
+  curl --fail --location --retry 5 --retry-delay 2 --retry-all-errors \
+    --connect-timeout 30 --output "${archive_path}" \
+    "${ANDROID_REPOSITORY_URL}/${archive_name}"
+  unzip -tq "${archive_path}" >/dev/null
+  mkdir -p "${extract_dir}"
+  unzip -q "${archive_path}" -d "${extract_dir}"
+
+  marker_path="$(find "${extract_dir}" -type f -name "${marker_name}" -print -quit)"
+  [[ -n "${marker_path}" ]] || fail "${archive_name} does not contain ${marker_name}."
+  source_dir="$(dirname "${marker_path}")"
+  install -d "$(dirname "${target_dir}")"
+  rm -rf -- "${target_dir}"
+  mv -- "${source_dir}" "${target_dir}"
+  [[ -f "${target_dir}/${marker_name}" ]] || \
+    fail "Android SDK component was not installed at ${target_dir}."
+  sha256sum "${archive_path}"
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -188,37 +218,29 @@ if [[ "${BUILD_ANDROID}" -eq 1 ]]; then
   fi
   ln -sfn "/opt/gradle-${GRADLE_VERSION}/bin/gradle" /usr/local/bin/gradle
 
-  if [[ ! -x "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/android" ]]; then
-    install -d "${ANDROID_SDK_ROOT}/cmdline-tools"
-    # Google's dl.google.com edge returns a false 404 from some cloud regions;
-    # redirector.gvt1.com is the official download endpoint used by the Android
-    # download page and works consistently on fresh VPS installations.
-    curl --fail --location --retry 5 --retry-delay 2 --retry-all-errors \
-      --connect-timeout 30 --output "${BUILD_TMP}/commandlinetools.zip" \
-      "${ANDROID_CLI_URL}"
-    echo "${ANDROID_CLI_SHA256}  ${BUILD_TMP}/commandlinetools.zip" | sha256sum -c -
-    unzip -q "${BUILD_TMP}/commandlinetools.zip" -d "${BUILD_TMP}/commandlinetools"
-    if [[ -d "${ANDROID_SDK_ROOT}/cmdline-tools/latest" ]]; then
-      mv "${ANDROID_SDK_ROOT}/cmdline-tools/latest" \
-        "${ANDROID_SDK_ROOT}/cmdline-tools/previous-$(date +%Y%m%d-%H%M%S)"
-    fi
-    mv "${BUILD_TMP}/commandlinetools/cmdline-tools" \
-      "${ANDROID_SDK_ROOT}/cmdline-tools/latest"
-  fi
+  # Install the exact SDK archives directly. The Android CLI currently tries
+  # to bootstrap itself from dl.google.com, which returns a false 404 in some
+  # cloud regions. These are the same official archives via Google's
+  # redirector and do not need sdkmanager or Android Studio.
+  install_android_component \
+    "platform-tools_r37.0.1-linux.zip" \
+    "${ANDROID_SDK_ROOT}/platform-tools" "adb"
+  install_android_component \
+    "platform-35_r02.zip" \
+    "${ANDROID_SDK_ROOT}/platforms/android-35" "android.jar"
+  install_android_component \
+    "build-tools_r34-linux.zip" \
+    "${ANDROID_SDK_ROOT}/build-tools/34.0.0" "apksigner"
+  install_android_component \
+    "build-tools_r35_linux.zip" \
+    "${ANDROID_SDK_ROOT}/build-tools/35.0.0" "apksigner"
 
   JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
   [[ -x "${JAVA_HOME}/bin/jlink" ]] || fail "Java 17 JDK is incomplete: jlink was not found in ${JAVA_HOME}"
   export ANDROID_HOME="${ANDROID_SDK_ROOT}"
   export ANDROID_SDK_ROOT
   export JAVA_HOME
-  export PATH="${JAVA_HOME}/bin:/opt/gradle-${GRADLE_VERSION}/bin:${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${PATH}"
-
-  set +o pipefail
-  yes | android --sdk="${ANDROID_SDK_ROOT}" sdk install \
-    platform-tools platforms/android-35 build-tools/34.0.0 build-tools/35.0.0
-  ANDROID_INSTALL_STATUS="${PIPESTATUS[1]}"
-  set -o pipefail
-  [[ "${ANDROID_INSTALL_STATUS}" -eq 0 ]] || fail "Android SDK package installation failed."
+  export PATH="${JAVA_HOME}/bin:/opt/gradle-${GRADLE_VERSION}/bin:${ANDROID_SDK_ROOT}/platform-tools:${PATH}"
 
   echo "sdk.dir=${ANDROID_SDK_ROOT}" > "${SCRIPT_DIR}/android/local.properties"
   GRADLE_OPTS="-Djava.net.preferIPv4Stack=true -Djava.net.preferIPv6Addresses=false" \
