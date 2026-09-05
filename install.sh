@@ -210,9 +210,8 @@ python3 -m venv "${APP_DIR}/venv"
 chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}/venv"
 
 echo "Running unit and live multiplayer tests before deployment..."
-chmod +x "${SCRIPT_DIR}/verify.sh"
 NEON_TEST_DATABASE="$(mktemp /tmp/neon-arena-test-db.XXXXXX)" \
-  "${SCRIPT_DIR}/verify.sh" --python "${APP_DIR}/venv/bin/python" --integration --port 8766
+  bash "${SCRIPT_DIR}/verify.sh" --python "${APP_DIR}/venv/bin/python" --integration --port 8766
 
 APK_SOURCE=""
 if [[ "${BUILD_ANDROID}" -eq 1 ]]; then
