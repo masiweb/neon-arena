@@ -120,9 +120,19 @@ if [[ -r /etc/os-release ]]; then
     echo "WARNING: This installer is tested on Ubuntu 24.04; detected ${PRETTY_NAME:-unknown}."
 fi
 
+MEMORY_KB="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+SWAP_KB="$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)"
+NEEDS_BUILD_SWAP=0
+if [[ "${BUILD_ANDROID}" -eq 1 && $((MEMORY_KB + SWAP_KB)) -lt 3145728 ]]; then
+  NEEDS_BUILD_SWAP=1
+fi
 AVAILABLE_MB="$(df -Pm /opt 2>/dev/null | awk 'NR==2 {print $4}' || true)"
-if [[ "${BUILD_ANDROID}" -eq 1 && "${AVAILABLE_MB:-0}" -lt 3500 ]]; then
-  fail "At least 3.5 GB of free disk space is required to build Android (available: ${AVAILABLE_MB:-unknown} MB)."
+REQUIRED_DISK_MB=3500
+if [[ "${NEEDS_BUILD_SWAP}" -eq 1 ]]; then
+  REQUIRED_DISK_MB=6500
+fi
+if [[ "${BUILD_ANDROID}" -eq 1 && "${AVAILABLE_MB:-0}" -lt "${REQUIRED_DISK_MB}" ]]; then
+  fail "At least ${REQUIRED_DISK_MB} MB of free disk space is required (available: ${AVAILABLE_MB:-unknown} MB)."
 fi
 if [[ "${BUILD_ANDROID}" -eq 1 && "$(uname -m)" != "x86_64" ]]; then
   fail "Android build tools require an x86_64 server. Use --skip-android on this architecture."
@@ -133,7 +143,23 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y \
   ca-certificates curl git nginx nodejs python3 python3-pip python3-venv \
-  unzip wget openjdk-17-jdk-headless
+  unzip util-linux wget openjdk-17-jdk-headless
+
+if [[ "${NEEDS_BUILD_SWAP}" -eq 1 ]]; then
+  SWAP_FILE="/swapfile-neon-arena"
+  echo "Low-memory server detected; preparing a 3 GB build swap file..."
+  if [[ ! -f "${SWAP_FILE}" ]]; then
+    fallocate -l 3G "${SWAP_FILE}"
+    chmod 600 "${SWAP_FILE}"
+    mkswap "${SWAP_FILE}" >/dev/null
+  fi
+  if ! swapon --show=NAME --noheadings | grep -Fxq "${SWAP_FILE}"; then
+    swapon "${SWAP_FILE}"
+  fi
+  if ! grep -Fq "${SWAP_FILE} none swap sw 0 0" /etc/fstab; then
+    printf '%s\n' "${SWAP_FILE} none swap sw 0 0" >> /etc/fstab
+  fi
+fi
 
 if ! id "${APP_USER}" >/dev/null 2>&1; then
   useradd --system --home "${APP_DIR}" --shell /usr/sbin/nologin "${APP_USER}"

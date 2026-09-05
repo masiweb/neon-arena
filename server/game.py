@@ -8,25 +8,32 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .maps import DEFAULT_MAP_ID, MAPS, map_options, public_map
+
 if TYPE_CHECKING:
     from fastapi import WebSocket
 else:
     WebSocket = Any
 
 
-ARENA_WIDTH = 1200
-ARENA_HEIGHT = 700
+ARENA_WIDTH = int(MAPS[DEFAULT_MAP_ID]["width"])
+ARENA_HEIGHT = int(MAPS[DEFAULT_MAP_ID]["height"])
 PLAYER_RADIUS = 21
+PLAYER_HEIGHT = 72
 PLAYER_SPEED = 285.0
 BULLET_SPEED = 650.0
+JUMP_VELOCITY = 430.0
+GRAVITY = 920.0
+STEP_CLEARANCE = 7.0
 ROUND_SECONDS = 120
 STARTING_LIVES = 3
 MAX_HEALTH = 140
 MAX_PLAYERS = 12
 POWERUP_FIRST_DELAY = 3.5
-POWERUP_SPAWN_MIN = 5.0
-POWERUP_SPAWN_MAX = 7.0
+POWERUP_SPAWN_MIN = 3.5
+POWERUP_SPAWN_MAX = 5.5
 POWERUP_TTL = 13.0
+MAX_POWERUPS = 8
 
 COLORS = [
     "#20d9ff",
@@ -43,27 +50,9 @@ COLORS = [
     "#ffb85a",
 ]
 
-# A compact three-lane FPS arena: two spawn yards, a central court and
-# alternate upper/lower routes. Rectangles keep collision/network packets tiny.
-OBSTACLES = [
-    {"x": 150, "y": 105, "w": 300, "h": 42, "height": 74},
-    {"x": 150, "y": 147, "w": 42, "h": 150, "height": 58},
-    {"x": 330, "y": 220, "w": 120, "h": 42, "height": 46},
-    {"x": 535, "y": 70, "w": 42, "h": 190, "height": 82},
-    {"x": 675, "y": 70, "w": 42, "h": 190, "height": 82},
-    {"x": 800, "y": 120, "w": 255, "h": 42, "height": 70},
-    {"x": 1013, "y": 162, "w": 42, "h": 145, "height": 56},
-    {"x": 470, "y": 322, "w": 260, "h": 56, "height": 62},
-    {"x": 145, "y": 430, "w": 42, "h": 155, "height": 56},
-    {"x": 145, "y": 543, "w": 300, "h": 42, "height": 74},
-    {"x": 325, "y": 468, "w": 120, "h": 42, "height": 46},
-    {"x": 535, "y": 440, "w": 42, "h": 190, "height": 82},
-    {"x": 675, "y": 440, "w": 42, "h": 190, "height": 82},
-    {"x": 805, "y": 538, "w": 250, "h": 42, "height": 70},
-    {"x": 1013, "y": 393, "w": 42, "h": 145, "height": 56},
-    {"x": 265, "y": 330, "w": 95, "h": 42, "height": 44},
-    {"x": 840, "y": 330, "w": 95, "h": 42, "height": 44},
-]
+# Backward-compatible aliases used by tests and utility callers. Each room uses
+# its own selected map at runtime.
+OBSTACLES = MAPS[DEFAULT_MAP_ID]["obstacles"]
 
 POWERUP_LABELS = {
     "speed": "افزایش سرعت",
@@ -74,10 +63,16 @@ POWERUP_LABELS = {
 }
 
 WEAPON_SPECS: dict[str, dict[str, Any]] = {
-    "base": {"interval": 0.22, "damage": 27, "range": 820.0, "spread": [0.0]},
-    "heavy": {"interval": 0.46, "damage": 48, "range": 900.0, "spread": [0.0]},
-    "rapid": {"interval": 0.105, "damage": 16, "range": 760.0, "spread": [-0.015, 0.015]},
-    "spread": {"interval": 0.39, "damage": 19, "range": 520.0, "spread": [-0.09, 0.0, 0.09]},
+    "base": {"interval": 0.22, "damage": 10, "range": 920.0, "spread": [0.0]},
+    "heavy": {"interval": 0.46, "damage": 25, "range": 1050.0, "spread": [0.0]},
+    "rapid": {"interval": 0.105, "damage": 7, "range": 820.0, "spread": [-0.015, 0.015]},
+    "spread": {"interval": 0.39, "damage": 9, "range": 620.0, "spread": [-0.09, 0.0, 0.09]},
+}
+
+BOT_DIFFICULTIES: dict[str, dict[str, Any]] = {
+    "easy": {"name": "آسان", "aim_error": 0.24, "range": 520.0, "speed": 0.78, "fire_delay": 1.55},
+    "normal": {"name": "معمولی", "aim_error": 0.085, "range": 760.0, "speed": 0.96, "fire_delay": 1.12},
+    "hard": {"name": "سخت", "aim_error": 0.025, "range": 980.0, "speed": 1.1, "fire_delay": 0.88},
 }
 
 
@@ -135,35 +130,68 @@ def ray_rect_distance(
     return near if 0.0 <= near <= max_distance else None
 
 
-def clear_position(x: float, y: float, radius: float = PLAYER_RADIUS) -> bool:
-    if x < radius or x > ARENA_WIDTH - radius or y < radius or y > ARENA_HEIGHT - radius:
+def clear_position(
+    x: float,
+    y: float,
+    radius: float = PLAYER_RADIUS,
+    arena: dict[str, Any] | None = None,
+    z: float = 0.0,
+) -> bool:
+    selected = arena or MAPS[DEFAULT_MAP_ID]
+    width, height = float(selected["width"]), float(selected["height"])
+    if x < radius or x > width - radius or y < radius or y > height - radius:
         return False
-    return not any(circle_hits_rect(x, y, radius, obstacle) for obstacle in OBSTACLES)
+    return not any(
+        float(obstacle.get("height", 100)) > z + STEP_CLEARANCE
+        and circle_hits_rect(x, y, radius, obstacle)
+        for obstacle in selected["obstacles"]
+    )
 
 
-def spawn_point(players: list["Player"]) -> tuple[float, float]:
+def surface_height(x: float, y: float, arena: dict[str, Any] | None = None) -> float:
+    selected = arena or MAPS[DEFAULT_MAP_ID]
+    return max(
+        (
+            float(obstacle.get("height", 100))
+            for obstacle in selected["obstacles"]
+            if obstacle["x"] <= x <= obstacle["x"] + obstacle["w"]
+            and obstacle["y"] <= y <= obstacle["y"] + obstacle["h"]
+        ),
+        default=0.0,
+    )
+
+
+def spawn_point(players: list["Player"], arena: dict[str, Any] | None = None) -> tuple[float, float]:
+    selected = arena or MAPS[DEFAULT_MAP_ID]
+    width, height = float(selected["width"]), float(selected["height"])
     for _ in range(80):
-        x = random.uniform(65, ARENA_WIDTH - 65)
-        y = random.uniform(65, ARENA_HEIGHT - 65)
-        if clear_position(x, y) and all(
+        x = random.uniform(65, width - 65)
+        y = random.uniform(65, height - 65)
+        if clear_position(x, y, arena=selected) and all(
             math.hypot(x - player.x, y - player.y) > 120 for player in players if player.alive
         ):
             return x, y
     return 80.0, 80.0
 
 
-def item_spawn_point(players: list["Player"], items: list["PowerUp"]) -> tuple[float, float]:
+def item_spawn_point(
+    players: list["Player"],
+    items: list["PowerUp"],
+    arena: dict[str, Any] | None = None,
+) -> tuple[float, float]:
+    selected = arena or MAPS[DEFAULT_MAP_ID]
+    width, height = float(selected["width"]), float(selected["height"])
     for _ in range(80):
-        x = random.uniform(55, ARENA_WIDTH - 55)
-        y = random.uniform(55, ARENA_HEIGHT - 55)
-        if not clear_position(x, y, 24):
+        x = random.uniform(55, width - 55)
+        y = random.uniform(55, height - 55)
+        if not clear_position(x, y, 24, selected):
             continue
         if any(math.hypot(x - item.x, y - item.y) < 90 for item in items):
             continue
         if any(math.hypot(x - player.x, y - player.y) < 70 for player in players if player.alive):
             continue
         return x, y
-    return ARENA_WIDTH / 2, ARENA_HEIGHT / 2
+    return width / 2, height / 2
 
 
 @dataclass(slots=True)
@@ -174,6 +202,9 @@ class Player:
     socket: WebSocket
     x: float
     y: float
+    z: float = 0.0
+    velocity_z: float = 0.0
+    grounded: bool = True
     health: int = 100
     lives: int = STARTING_LIVES
     score: int = 0
@@ -200,6 +231,7 @@ class Player:
     is_bot: bool = False
     bot_dash_at: float = 0.0
     bot_shield_at: float = 0.0
+    bot_jump_at: float = 0.0
     joined_at: float = field(default_factory=time.monotonic)
 
     def public(self, now: float) -> dict[str, Any]:
@@ -209,6 +241,8 @@ class Player:
             "color": self.color,
             "x": round(self.x, 1),
             "y": round(self.y, 1),
+            "z": round(self.z, 1),
+            "vz": round(self.velocity_z, 1),
             "health": self.health,
             "lives": self.lives,
             "score": self.score,
@@ -223,6 +257,7 @@ class Player:
             "ack": self.last_input_seq,
             "dashCooldown": round(max(0.0, self.dash_ready_at - now), 1),
             "shieldCooldown": round(max(0.0, self.shield_ready_at - now), 1),
+            "grounded": self.grounded,
         }
 
 
@@ -234,6 +269,7 @@ class Bullet:
     y1: float
     x2: float
     y2: float
+    z: float
     color: str
     expires_at: float
     hit: bool = False
@@ -246,6 +282,7 @@ class Bullet:
             "y1": round(self.y1, 1),
             "x2": round(self.x2, 1),
             "y2": round(self.y2, 1),
+            "z": round(self.z, 1),
             "color": self.color,
             "hit": self.hit,
         }
@@ -272,6 +309,8 @@ class PowerUp:
 class Room:
     def __init__(self, code: str) -> None:
         self.code = code
+        self.map_id = DEFAULT_MAP_ID
+        self.bot_difficulty = "normal"
         self.players: dict[str, Player] = {}
         self.bullets: list[Bullet] = []
         self.powerups: list[PowerUp] = []
@@ -288,6 +327,13 @@ class Room:
         self.task: asyncio.Task[None] | None = None
         self.closed = False
 
+    @property
+    def arena(self) -> dict[str, Any]:
+        return MAPS[self.map_id]
+
+    def arena_public(self) -> dict[str, Any]:
+        return public_map(self.map_id)
+
     def start_loop(self) -> None:
         if not self.task or self.task.done():
             self.task = asyncio.create_task(self._loop())
@@ -298,7 +344,7 @@ class Room:
         player_id = secrets.token_urlsafe(8)
         used_colors = {player.color for player in self.players.values()}
         color = next((item for item in COLORS if item not in used_colors), random.choice(COLORS))
-        x, y = spawn_point(list(self.players.values()))
+        x, y = spawn_point(list(self.players.values()), self.arena)
         player = Player(player_id, name, color, socket, x, y)
         self.players[player_id] = player
         if self.host_id is None:
@@ -310,7 +356,12 @@ class Room:
                 "playerId": player_id,
                 "room": self.code,
                 "hostId": self.host_id,
-                "arena": {"width": ARENA_WIDTH, "height": ARENA_HEIGHT, "obstacles": OBSTACLES},
+                "arena": self.arena_public(),
+                "maps": map_options(),
+                "botDifficulties": [
+                    {"id": level_id, "name": config["name"]}
+                    for level_id, config in BOT_DIFFICULTIES.items()
+                ],
             }
         )
         await self.broadcast_event("join", f"{player.name} وارد بازی شد")
@@ -323,10 +374,11 @@ class Room:
         player_id = f"bot-{secrets.token_hex(4)}"
         used_colors = {player.color for player in self.players.values()}
         color = next((item for item in COLORS if item not in used_colors), random.choice(COLORS))
-        x, y = spawn_point(list(self.players.values()))
+        x, y = spawn_point(list(self.players.values()), self.arena)
         bot = Player(player_id, f"بات {bot_number}", color, None, x, y, is_bot=True)
         bot.bot_dash_at = time.monotonic() + random.uniform(2.0, 5.0)
         bot.bot_shield_at = time.monotonic() + random.uniform(3.0, 6.0)
+        bot.bot_jump_at = time.monotonic() + random.uniform(1.5, 4.0)
         self.players[player_id] = bot
         self.start_loop()
         await self.broadcast_event("bot_join", f"{bot.name} اضافه شد")
@@ -383,8 +435,15 @@ class Room:
             elif action == "shield" and now >= player.shield_ready_at:
                 player.shield_until = max(player.shield_until, now + 1.4)
                 player.shield_ready_at = now + 7.0
+            elif action == "jump" and player.grounded:
+                player.velocity_z = JUMP_VELOCITY
+                player.grounded = False
         elif kind == "choose_weapon":
             await self._choose_winner_weapon(player, str(payload.get("weapon", "")))
+        elif kind == "select_map" and player.id == self.host_id and self.phase == "lobby":
+            await self._select_map(str(payload.get("map", "")))
+        elif kind == "set_bot_difficulty" and player.id == self.host_id and self.phase == "lobby":
+            await self._set_bot_difficulty(str(payload.get("difficulty", "")))
         elif kind == "add_bot" and player.id == self.host_id and self.phase == "lobby":
             try:
                 await self.add_bot()
@@ -396,6 +455,29 @@ class Room:
             if self.winner_id and not self.winner_choice and self.winner_id in self.players:
                 return
             await self._start_round()
+
+    async def _select_map(self, map_id: str) -> None:
+        if map_id not in MAPS or map_id == self.map_id:
+            return
+        self.map_id = map_id
+        placed: list[Player] = []
+        for member in self.players.values():
+            member.x, member.y = spawn_point(placed, self.arena)
+            member.z = 0.0
+            member.velocity_z = 0.0
+            member.grounded = True
+            placed.append(member)
+        await self._broadcast({"type": "arena", "arena": self.arena_public()})
+        await self.broadcast_event("map", f"نقشه {self.arena['name']} انتخاب شد")
+
+    async def _set_bot_difficulty(self, difficulty: str) -> None:
+        if difficulty not in BOT_DIFFICULTIES or difficulty == self.bot_difficulty:
+            return
+        self.bot_difficulty = difficulty
+        await self.broadcast_event(
+            "bot_difficulty",
+            f"قدرت بات‌ها: {BOT_DIFFICULTIES[difficulty]['name']}",
+        )
 
     async def _choose_winner_weapon(self, player: Player, weapon: str) -> None:
         if (
@@ -415,6 +497,7 @@ class Room:
         self.round_size = len(self.players)
         self.bullets.clear()
         self.powerups.clear()
+        placed: list[Player] = []
         for member in self.players.values():
             member.score = 0
             member.health = 100
@@ -426,12 +509,16 @@ class Room:
             member.speed_until = 0.0
             member.shield_until = 0.0
             member.dash_until = 0.0
+            member.z = 0.0
+            member.velocity_z = 0.0
+            member.grounded = True
             member.base_weapon = member.reward_weapon or "base"
             member.weapon = member.base_weapon
             member.weapon_until = 0.0
             member.radar_hidden_until = 0.0
             member.reward_weapon = None
-            member.x, member.y = spawn_point(list(self.players.values()))
+            member.x, member.y = spawn_point(placed, self.arena)
+            placed.append(member)
         self.winner_id = None
         self.winner_name = ""
         self.winner_choice = ""
@@ -485,7 +572,10 @@ class Room:
                 if player.lives > 0 and now >= player.respawn_at:
                     player.alive = True
                     player.health = 100
-                    player.x, player.y = spawn_point(living)
+                    player.x, player.y = spawn_point(living, self.arena)
+                    player.z = 0.0
+                    player.velocity_z = 0.0
+                    player.grounded = True
                     living.append(player)
                 continue
 
@@ -503,13 +593,36 @@ class Room:
             speed_multiplier = 1.55 if now < player.speed_until else 1.0
             if now < player.dash_until:
                 speed_multiplier *= 2.55
+            if player.is_bot:
+                speed_multiplier *= float(BOT_DIFFICULTIES[self.bot_difficulty]["speed"])
+
+            support_before = surface_height(player.x, player.y, self.arena)
+            if player.grounded:
+                if abs(player.z - support_before) <= STEP_CLEARANCE:
+                    player.z = support_before
+                    player.velocity_z = 0.0
+                else:
+                    player.grounded = False
+            if not player.grounded:
+                player.velocity_z -= GRAVITY * dt
+                player.z = max(0.0, player.z + player.velocity_z * dt)
+
             speed = PLAYER_SPEED * speed_multiplier
-            next_x = clamp(player.x + player.move_x * speed * dt, PLAYER_RADIUS, ARENA_WIDTH - PLAYER_RADIUS)
-            if clear_position(next_x, player.y):
+            width, height = float(self.arena["width"]), float(self.arena["height"])
+            next_x = clamp(player.x + player.move_x * speed * dt, PLAYER_RADIUS, width - PLAYER_RADIUS)
+            if clear_position(next_x, player.y, arena=self.arena, z=player.z):
                 player.x = next_x
-            next_y = clamp(player.y + player.move_y * speed * dt, PLAYER_RADIUS, ARENA_HEIGHT - PLAYER_RADIUS)
-            if clear_position(player.x, next_y):
+            next_y = clamp(player.y + player.move_y * speed * dt, PLAYER_RADIUS, height - PLAYER_RADIUS)
+            if clear_position(player.x, next_y, arena=self.arena, z=player.z):
                 player.y = next_y
+
+            support_after = surface_height(player.x, player.y, self.arena)
+            if player.velocity_z <= 0.0 and player.z <= support_after:
+                player.z = support_after
+                player.velocity_z = 0.0
+                player.grounded = True
+            elif player.grounded and abs(player.z - support_after) > STEP_CLEARANCE:
+                player.grounded = False
 
             self._collect_powerups(player, now)
             if player.shooting:
@@ -524,7 +637,11 @@ class Room:
         target = min(targets, key=lambda player: math.hypot(player.x - bot.x, player.y - bot.y))
         dx, dy = target.x - bot.x, target.y - bot.y
         distance = math.hypot(dx, dy) or 1.0
-        aim_x, aim_y = dx / distance, dy / distance
+        difficulty = BOT_DIFFICULTIES[self.bot_difficulty]
+        ideal_angle = math.atan2(dy, dx)
+        noise_seed = sum(bot.id.encode()) * 0.021
+        aim_error = math.sin(now * 2.15 + noise_seed) * float(difficulty["aim_error"])
+        aim_x, aim_y = math.cos(ideal_angle + aim_error), math.sin(ideal_angle + aim_error)
         bot.aim_x, bot.aim_y = aim_x, aim_y
         forward = 1.0 if distance > 270 else -0.55 if distance < 145 else 0.0
         strafe = math.sin(now * 1.7 + sum(bot.id.encode()) * 0.03) * 0.72
@@ -532,7 +649,7 @@ class Room:
             aim_x * forward - aim_y * strafe,
             aim_y * forward + aim_x * strafe,
         )
-        bot.shooting = distance < 610
+        bot.shooting = distance < float(difficulty["range"])
         bot.last_input_at = now
         if now >= bot.bot_dash_at and distance > 260 and now >= bot.dash_ready_at:
             bot.dash_until = now + 0.28
@@ -542,10 +659,18 @@ class Room:
             bot.shield_until = max(bot.shield_until, now + 1.4)
             bot.shield_ready_at = now + 7.0
             bot.bot_shield_at = now + random.uniform(6.0, 10.0)
+        ahead_x = bot.x + bot.move_x * 52
+        ahead_y = bot.y + bot.move_y * 52
+        blocked_ahead = not clear_position(ahead_x, ahead_y, arena=self.arena, z=bot.z)
+        if bot.grounded and now >= bot.bot_jump_at and (blocked_ahead or random.random() < 0.012):
+            bot.velocity_z = JUMP_VELOCITY
+            bot.grounded = False
+            bot.bot_jump_at = now + random.uniform(2.4, 5.2)
 
     def _fire(self, player: Player, now: float) -> None:
         spec = WEAPON_SPECS.get(player.weapon, WEAPON_SPECS["base"])
-        if now - player.last_shot < spec["interval"]:
+        fire_delay = float(BOT_DIFFICULTIES[self.bot_difficulty]["fire_delay"]) if player.is_bot else 1.0
+        if now - player.last_shot < spec["interval"] * fire_delay:
             return
         player.last_shot = now
         base_angle = math.atan2(player.aim_y, player.aim_x)
@@ -555,17 +680,20 @@ class Room:
             start_x, start_y = player.x + dx * 31, player.y + dy * 31
             maximum = float(spec["range"])
             wall_distance = maximum
-            for obstacle in OBSTACLES:
+            shot_height = player.z + 48.0
+            for obstacle in self.arena["obstacles"]:
+                if shot_height > float(obstacle.get("height", 100)):
+                    continue
                 hit_distance = ray_rect_distance(start_x, start_y, dx, dy, obstacle, wall_distance)
                 if hit_distance is not None:
                     wall_distance = hit_distance
             boundary_distances = []
             if dx > 1e-9:
-                boundary_distances.append((ARENA_WIDTH - start_x) / dx)
+                boundary_distances.append((float(self.arena["width"]) - start_x) / dx)
             elif dx < -1e-9:
                 boundary_distances.append((0 - start_x) / dx)
             if dy > 1e-9:
-                boundary_distances.append((ARENA_HEIGHT - start_y) / dy)
+                boundary_distances.append((float(self.arena["height"]) - start_y) / dy)
             elif dy < -1e-9:
                 boundary_distances.append((0 - start_y) / dy)
             wall_distance = min([wall_distance, *(value for value in boundary_distances if value >= 0)])
@@ -595,13 +723,19 @@ class Room:
                     start_y,
                     start_x + dx * end_distance,
                     start_y + dy * end_distance,
+                    shot_height,
                     player.color,
                     now + 0.16,
                     hit=target is not None,
                 )
             )
             if target is not None:
-                damage = max(1, round(spec["damage"] * 0.25)) if target.shield_until > now else spec["damage"]
+                # Weapon damage is deterministic for humans and bots alike:
+                # normal rounds remove 10 HP and heavy rounds remove 25 HP.
+                damage = float(spec["damage"])
+                if target.shield_until > now:
+                    damage *= 0.25
+                damage = max(1, round(damage))
                 target.health = max(0, target.health - damage)
                 if target.health == 0:
                     self._eliminate_life(target, player.id, now)
@@ -621,8 +755,8 @@ class Room:
 
     def _update_powerups(self, now: float) -> None:
         self.powerups = [item for item in self.powerups if item.expires_at > now]
-        if now >= self.next_powerup_at and len(self.powerups) < 4:
-            x, y = item_spawn_point(list(self.players.values()), self.powerups)
+        if now >= self.next_powerup_at and len(self.powerups) < MAX_POWERUPS:
+            x, y = item_spawn_point(list(self.players.values()), self.powerups, self.arena)
             self.powerups.append(
                 PowerUp(
                     id=secrets.token_hex(4),
@@ -704,6 +838,9 @@ class Room:
             "winner": self.winner_name,
             "winnerId": self.winner_id,
             "winnerChoice": self.winner_choice,
+            "mapId": self.map_id,
+            "mapName": self.arena["name"],
+            "botDifficulty": self.bot_difficulty,
             "players": [player.public(now) for player in self.players.values()],
             "bullets": [bullet.public() for bullet in self.bullets],
             "powerups": [item.public(now) for item in self.powerups],

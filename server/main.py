@@ -19,8 +19,8 @@ ROOM_RE = re.compile(r"^[A-HJ-NP-Z2-9]{4}$")
 
 app = FastAPI(title="Neon Arena", docs_url=None, redoc_url=None)
 hub = GameHub()
-GAME_VERSION = "2.1.0"
-PROTOCOL_VERSION = "6"
+GAME_VERSION = "2.2.0"
+PROTOCOL_VERSION = "7"
 PUBLIC_ORIGIN = os.environ.get("NEON_PUBLIC_ORIGIN", "https://game.chanelchat.ir").rstrip("/")
 
 app.add_middleware(

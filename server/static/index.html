@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>نبرد نئون</title>
-    <link rel="stylesheet" href="/static/styles.css?v=2.1.0" />
+    <link rel="stylesheet" href="/static/styles.css?v=2.2.0" />
   </head>
   <body>
     <div id="rotateNotice" class="rotate-notice" aria-live="polite">
@@ -42,7 +42,7 @@
           <button id="fullscreenEntry" class="fullscreen-entry" type="button">⛶ نمایش تمام‌صفحه</button>
           <a id="downloadAndroid" class="android-download" href="/static/neon-arena-android-latest.apk" download>
             <b>↓ دانلود آخرین نسخه اندروید</b>
-            <span>نسخه ۲.۱.۰ · مناسب Android 7 به بالا</span>
+            <span>نسخه ۲.۲.۰ · مناسب Android 7 به بالا</span>
           </a>
           <small>بدون نصب · سبک · مناسب ۲ تا ۱۲ نفر</small>
         </div>
@@ -51,7 +51,7 @@
       <section id="gameScreen" class="game-screen hidden" aria-label="میدان بازی">
         <canvas id="arena"></canvas>
         <div id="lookSurface" class="look-surface" aria-label="برای چرخاندن دوربین انگشت را بکشید"></div>
-        <div class="desktop-help">برای قفل موس کلیک کنید · WASD حرکت · کلیک چپ شلیک · Shift شتاب · E سپر</div>
+        <div class="desktop-help">برای قفل موس کلیک کنید · WASD حرکت · کلیک چپ شلیک · Space پرش · Shift شتاب · E سپر</div>
         <canvas id="minimap" aria-label="نقشه محیط و بازیکنان"></canvas>
         <div class="crosshair" aria-hidden="true"><i></i><i></i></div>
         <div id="damageFlash" class="damage-flash" aria-hidden="true"></div>
@@ -81,12 +81,21 @@
           <button id="fullscreen" class="mini-button icon-only" type="button" aria-label="تمام صفحه">⛶</button>
           <button id="soundToggle" class="mini-button icon-only" type="button" aria-label="قطع و وصل صدا">♪</button>
           <span id="roomBadge">اتاق: ----</span>
+          <span id="mapBadge">نقشه: دژ نئون</span>
           <span id="weaponBadge" class="weapon-badge">سلاح: معمولی</span>
         </div>
 
         <div id="centerMessage" class="center-message">
           <strong>منتظر بازیکن‌ها</strong>
           <span>لینک اتاق را برای دوستان بفرستید</span>
+          <div id="lobbySettings" class="lobby-settings hidden" aria-label="تنظیمات راند">
+            <label>نقشه
+              <select id="mapSelect" aria-label="انتخاب نقشه"></select>
+            </label>
+            <label>قدرت و دقت بات
+              <select id="botDifficulty" aria-label="قدرت و دقت بات"></select>
+            </label>
+          </div>
           <button id="startRound" class="button primary hidden" type="button">شروع بازی</button>
           <div id="botControls" class="bot-controls hidden" aria-label="مدیریت بازیکن‌های بات">
             <button id="removeBot" type="button">− حذف بات</button>
@@ -107,6 +116,7 @@
         </div>
         <div class="right-controls">
           <div class="ability-row">
+            <button id="jumpButton" class="ability jump" type="button" aria-label="پرش"><span>↥</span><b>پرش</b></button>
             <button id="shieldButton" class="ability shield" type="button" aria-label="سپر"><span>◇</span><i id="shieldCooldown"></i></button>
             <button id="dashButton" class="ability dash" type="button" aria-label="شتاب"><span>»</span><i id="dashCooldown"></i></button>
           </div>
@@ -114,7 +124,7 @@
         </div>
       </section>
     </main>
-    <script src="/static/renderer3d.js?v=2.1.0"></script>
-    <script src="/static/game.js?v=2.1.0" defer></script>
+    <script src="/static/renderer3d.js?v=2.2.0"></script>
+    <script src="/static/game.js?v=2.2.0" defer></script>
   </body>
 </html>

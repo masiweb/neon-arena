@@ -19,6 +19,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 public final class MainActivity extends Activity {
+    private static final String PREF_SAFE_RENDERER = "safe_renderer";
     private WebView gameView;
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -29,7 +30,8 @@ public final class MainActivity extends Activity {
 
         gameView = new WebView(this);
         gameView.setBackgroundColor(Color.BLACK);
-        gameView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        boolean safeRenderer = getPreferences(MODE_PRIVATE).getBoolean(PREF_SAFE_RENDERER, false);
+        gameView.setLayerType(safeRenderer ? View.LAYER_TYPE_SOFTWARE : View.LAYER_TYPE_HARDWARE, null);
 
         WebSettings settings = gameView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -43,7 +45,7 @@ public final class MainActivity extends Activity {
         settings.setSupportZoom(false);
         settings.setTextZoom(100);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " NeonArenaAndroid/2.1.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " NeonArenaAndroid/2.2.0");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             settings.setSafeBrowsingEnabled(true);
         }
@@ -64,6 +66,10 @@ public final class MainActivity extends Activity {
 
             @Override
             public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                // If a vendor GPU/WebView crashes (seen on a few Android 15
+                // devices), restart once in the lightweight 2D safe renderer
+                // instead of entering a crash/recreate loop.
+                getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_SAFE_RENDERER, true).apply();
                 ViewGroup parent = (ViewGroup) view.getParent();
                 if (parent != null) parent.removeView(view);
                 view.destroy();

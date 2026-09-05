@@ -7,8 +7,19 @@
   const playerName = $("playerName");
   const roomCode = $("roomCode");
   const entryError = $("entryError");
-  const canvas = $("arena");
-  const renderer3D = window.NeonRenderer3D?.create(canvas) || null;
+  let canvas = $("arena");
+  let renderer3D = null;
+  try {
+    renderer3D = window.NeonRenderer3D?.create(canvas) || null;
+  } catch (error) {
+    // A few Android WebView/GPU combinations reject otherwise valid WebGL
+    // shaders. A canvas cannot switch from WebGL to 2D after a context was
+    // created, so replace it before entering compatibility mode.
+    console.warn("WebGL renderer unavailable; using compatibility mode", error);
+    const fallbackCanvas = canvas.cloneNode(false);
+    canvas.replaceWith(fallbackCanvas);
+    canvas = fallbackCanvas;
+  }
   const ctx = renderer3D ? null : canvas.getContext("2d", { alpha: false });
   const coarsePointer = matchMedia("(pointer: coarse)").matches;
   const minimap = $("minimap");
@@ -27,6 +38,11 @@
   const startRound = $("startRound");
   const weaponChooser = $("weaponChooser");
   const botControls = $("botControls");
+  const lobbySettings = $("lobbySettings");
+  const mapSelect = $("mapSelect");
+  const botDifficulty = $("botDifficulty");
+  const mapBadge = $("mapBadge");
+  const jumpButton = $("jumpButton");
   const toast = $("toast");
   const crosshair = document.querySelector(".crosshair");
   const damageFlash = $("damageFlash");
@@ -62,7 +78,7 @@
   const wsOrigin = isAndroidApp
     ? androidServerOrigin.replace(/^https:/, "wss:")
     : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
-  const protocolVersion = "6";
+  const protocolVersion = "7";
   if (isAndroidApp) $("downloadAndroid")?.classList.add("hidden");
 
   const app = {
@@ -70,9 +86,11 @@
     playerId: null,
     room: null,
     hostId: null,
+    maps: [],
+    botDifficulties: [],
     state: null,
     stateReceivedAt: performance.now(),
-    arena: { width: 1200, height: 700, obstacles: [] },
+    arena: { id: "citadel", name: "دژ نئون", width: 3600, height: 2100, obstacles: [], theme: {} },
     move: [0, 0],
     padMove: [0, 0],
     aim: [1, 0],
@@ -93,6 +111,10 @@
     keys: new Set(),
     lastFrame: performance.now(),
     audioContext: null,
+    audioMaster: null,
+    musicBus: null,
+    effectsBus: null,
+    noiseBuffer: null,
     musicTimer: null,
     musicStep: 0,
     audioMuted: localStorage.getItem("neon-muted") === "1",
@@ -190,12 +212,20 @@
       app.playerId = message.playerId;
       app.room = message.room;
       app.hostId = message.hostId;
-      app.arena = message.arena;
+      app.maps = message.maps || [];
+      app.botDifficulties = message.botDifficulties || [];
+      applyArena(message.arena);
+      populateLobbyOptions();
       roomBadge.textContent = `اتاق: ${message.room}`;
       history.replaceState(null, "", `?room=${message.room}`);
       entryScreen.classList.add("hidden");
       gameScreen.classList.remove("hidden");
+      requestAnimationFrame(fit);
       requestFullscreenSoft();
+      return;
+    }
+    if (message.type === "arena") {
+      applyArena(message.arena);
       return;
     }
     if (message.type === "state") {
@@ -213,6 +243,32 @@
     }
   }
 
+  function applyArena(arena) {
+    if (!arena?.width || !arena?.height || !Array.isArray(arena.obstacles)) return;
+    app.arena = arena;
+    app.renderPlayers.clear();
+    mapBadge.textContent = `نقشه: ${arena.name || "نئون"}`;
+    if (mapSelect) mapSelect.value = arena.id || "citadel";
+    requestAnimationFrame(fitMinimap);
+  }
+
+  function populateLobbyOptions() {
+    mapSelect.replaceChildren(...app.maps.map((map) => {
+      const option = document.createElement("option");
+      option.value = map.id;
+      option.textContent = map.name;
+      option.title = map.description || "";
+      return option;
+    }));
+    botDifficulty.replaceChildren(...app.botDifficulties.map((level) => {
+      const option = document.createElement("option");
+      option.value = level.id;
+      option.textContent = level.name;
+      return option;
+    }));
+    mapSelect.value = app.arena.id || "citadel";
+  }
+
   function updateHud(previous) {
     const state = app.state;
     const me = state.players.find((player) => player.id === app.playerId);
@@ -224,6 +280,7 @@
     lives.innerHTML = Array.from({ length: 3 }, (_, index) => `<i class="${index < me.lives ? "" : "lost"}">♥</i>`).join("");
     myScore.textContent = fa.format(me.score);
     weaponBadge.textContent = `سلاح: ${weaponNames[me.weapon] || weaponNames.base}${me.speedBoost ? " · سرعت+" : ""}${me.radarHidden ? " · اختفا" : ""}`;
+    mapBadge.textContent = `نقشه: ${state.mapName || app.arena.name || "نئون"}`;
 
     if (me.health < app.previousHealth) {
       navigator.vibrate?.(35);
@@ -243,6 +300,8 @@
     updateCenterMessage();
     updateCooldown($("dashButton"), $("dashCooldown"), me.dashCooldown, 4);
     updateCooldown($("shieldButton"), $("shieldCooldown"), me.shieldCooldown, 7);
+    jumpButton.disabled = !me.grounded || state.phase !== "playing" || !me.alive;
+    jumpButton.classList.toggle("cooling", jumpButton.disabled);
 
     if (previous?.bullets) {
       const oldIds = new Set(previous.bullets.map((bullet) => bullet.id));
@@ -253,7 +312,10 @@
             acknowledgePredictedBullet(bullet);
             if (bullet.hit) showHitConfirmation();
           }
-          else playShot(false);
+          else {
+            const shooter = state.players.find((player) => player.id === bullet.owner);
+            playShot(false, shooter?.weapon || "base");
+          }
         }
       }
     }
@@ -285,6 +347,7 @@
     const me = state.players.find((player) => player.id === app.playerId);
     startRound.classList.add("hidden");
     botControls.classList.add("hidden");
+    lobbySettings.classList.add("hidden");
     weaponChooser.classList.add("hidden");
     centerMessage.classList.remove("off");
     const mustChooseWeapon = state.winnerId === app.playerId && !state.winnerChoice && ["ended", "lobby"].includes(state.phase);
@@ -301,6 +364,9 @@
         $("botCount").textContent = `${fa.format(bots)} بات`;
         $("removeBot").disabled = bots === 0;
         $("addBot").disabled = state.players.length >= 12;
+        mapSelect.value = state.mapId || app.arena.id || "citadel";
+        botDifficulty.value = state.botDifficulty || "normal";
+        lobbySettings.classList.remove("hidden");
         botControls.classList.remove("hidden");
       }
     } else if (state.phase === "countdown") {
@@ -475,7 +541,7 @@
       const delta = Math.atan2(Math.sin(direction - app.cameraAngle), Math.cos(direction - app.cameraAngle));
       const angleError = Math.abs(delta);
       const score = angleError * 900 + distance;
-      if (distance < maximumDistance && angleError < cone && score < bestScore && hasLineOfSight(me.x, me.y, player.x, player.y)) {
+      if (distance < maximumDistance && angleError < cone && score < bestScore && hasLineOfSight(me.x, me.y, player.x, player.y, (me.z || 0) + 48)) {
         best = { player, direction, delta, distance };
         bestScore = score;
       }
@@ -483,12 +549,12 @@
     return best;
   }
 
-  function hasLineOfSight(x1, y1, x2, y2) {
+  function hasLineOfSight(x1, y1, x2, y2, rayHeight = 48) {
     const distance = Math.hypot(x2 - x1, y2 - y1);
     const steps = Math.max(1, Math.ceil(distance / 18));
     for (let step = 2; step < steps; step++) {
       const ratio = step / steps;
-      if (wallAt(x1 + (x2 - x1) * ratio, y1 + (y2 - y1) * ratio) >= 0) return false;
+      if (wallAt(x1 + (x2 - x1) * ratio, y1 + (y2 - y1) * ratio, rayHeight) >= 0) return false;
     }
     return true;
   }
@@ -509,15 +575,40 @@
     if (app.audioMuted) return;
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) return;
-    if (!app.audioContext) app.audioContext = new AudioContextClass();
+    if (!app.audioContext) {
+      const audio = new AudioContextClass();
+      const compressor = audio.createDynamicsCompressor();
+      const master = audio.createGain();
+      const musicBus = audio.createGain();
+      const effectsBus = audio.createGain();
+      compressor.threshold.value = -18;
+      compressor.knee.value = 12;
+      compressor.ratio.value = 7;
+      compressor.attack.value = .004;
+      compressor.release.value = .2;
+      master.gain.value = .72;
+      musicBus.gain.value = .42;
+      effectsBus.gain.value = .9;
+      musicBus.connect(compressor);
+      effectsBus.connect(compressor);
+      compressor.connect(master).connect(audio.destination);
+      const noise = audio.createBuffer(1, Math.floor(audio.sampleRate * .6), audio.sampleRate);
+      const channel = noise.getChannelData(0);
+      for (let index = 0; index < channel.length; index++) channel[index] = Math.random() * 2 - 1;
+      app.audioContext = audio;
+      app.audioMaster = master;
+      app.musicBus = musicBus;
+      app.effectsBus = effectsBus;
+      app.noiseBuffer = noise;
+    }
     if (app.audioContext.state === "suspended") app.audioContext.resume().catch(() => {});
     if (!app.musicTimer) {
       playMusicNote();
-      app.musicTimer = setInterval(playMusicNote, 520);
+      app.musicTimer = setInterval(playMusicNote, 260);
     }
   }
 
-  function tone(frequency, duration, volume, type = "sine", delay = 0) {
+  function tone(frequency, duration, volume, type = "sine", delay = 0, bus = "effects", endFrequency = frequency) {
     const audio = app.audioContext;
     if (!audio || app.audioMuted || audio.state !== "running") return;
     const start = audio.currentTime + delay;
@@ -525,34 +616,75 @@
     const gain = audio.createGain();
     oscillator.type = type;
     oscillator.frequency.setValueAtTime(frequency, start);
+    oscillator.frequency.exponentialRampToValueAtTime(Math.max(20, endFrequency), start + duration);
     gain.gain.setValueAtTime(.0001, start);
     gain.gain.exponentialRampToValueAtTime(volume, start + .012);
     gain.gain.exponentialRampToValueAtTime(.0001, start + duration);
-    oscillator.connect(gain).connect(audio.destination);
+    oscillator.connect(gain).connect(bus === "music" ? app.musicBus : app.effectsBus);
     oscillator.start(start);
     oscillator.stop(start + duration + .03);
   }
 
+  function noiseBurst(duration, volume, cutoff, delay = 0, bus = "effects") {
+    const audio = app.audioContext;
+    if (!audio || !app.noiseBuffer || app.audioMuted || audio.state !== "running") return;
+    const start = audio.currentTime + delay;
+    const source = audio.createBufferSource();
+    const filter = audio.createBiquadFilter();
+    const gain = audio.createGain();
+    source.buffer = app.noiseBuffer;
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(cutoff, start);
+    filter.frequency.exponentialRampToValueAtTime(Math.max(120, cutoff * .34), start + duration);
+    gain.gain.setValueAtTime(volume, start);
+    gain.gain.exponentialRampToValueAtTime(.0001, start + duration);
+    source.connect(filter).connect(gain).connect(bus === "music" ? app.musicBus : app.effectsBus);
+    source.start(start);
+    source.stop(start + duration + .02);
+  }
+
   function playMusicNote() {
     if (!app.audioContext || app.audioMuted || document.hidden) return;
-    const bass = [55, 65.41, 73.42, 49][Math.floor(app.musicStep / 4) % 4];
-    const notes = [220, 261.63, 293.66, 329.63, 293.66, 261.63, 196, 246.94];
-    tone(bass, .42, .018, "sine");
-    tone(notes[app.musicStep % notes.length], .18, .011, "triangle", .04);
+    const step = app.musicStep % 16;
+    const bass = [55, 55, 65.41, 65.41, 73.42, 73.42, 49, 49][Math.floor(step / 2)];
+    const notes = [220, 0, 293.66, 0, 329.63, 293.66, 0, 246.94, 196, 0, 261.63, 0, 293.66, 246.94, 220, 0];
+    if (step % 2 === 0) tone(bass, .24, .028, "sawtooth", 0, "music", bass * .82);
+    if (notes[step]) tone(notes[step], .15, .014, "triangle", .025, "music", notes[step] * 1.01);
+    if (step === 0 || step === 8) tone(82, .16, .038, "sine", 0, "music", 38);
+    if (step === 4 || step === 12) noiseBurst(.075, .012, 3400, 0, "music");
     app.musicStep += 1;
   }
 
-  function playShot(isMine) {
+  function playShot(isMine, weapon = "base") {
     if (!app.audioContext || app.audioMuted) return;
-    const base = isMine ? 128 : 92;
-    tone(base, .065, isMine ? .065 : .018, "square");
-    tone(base * 2.8, .038, isMine ? .028 : .009, "sawtooth", .006);
+    const scale = isMine ? 1 : .28;
+    if (weapon === "heavy") {
+      tone(155, .16, .11 * scale, "sawtooth", 0, "effects", 48);
+      tone(72, .2, .085 * scale, "sine", .006, "effects", 34);
+      noiseBurst(.14, .095 * scale, 1500);
+    } else if (weapon === "rapid") {
+      tone(260, .052, .07 * scale, "square", 0, "effects", 125);
+      noiseBurst(.045, .045 * scale, 4200);
+    } else if (weapon === "spread") {
+      tone(130, .12, .095 * scale, "sawtooth", 0, "effects", 58);
+      noiseBurst(.11, .08 * scale, 2200);
+      tone(310, .04, .035 * scale, "square", .012, "effects", 180);
+    } else {
+      tone(205, .085, .082 * scale, "square", 0, "effects", 92);
+      tone(680, .035, .03 * scale, "sawtooth", .004, "effects", 260);
+      noiseBurst(.065, .045 * scale, 3200);
+    }
   }
 
   function playHit() {
     if (!app.audioContext || app.audioMuted) return;
-    tone(720, .055, .025, "triangle");
-    tone(980, .04, .018, "sine", .025);
+    tone(720, .06, .035, "triangle", 0, "effects", 1080);
+    tone(1180, .045, .022, "sine", .028, "effects", 820);
+  }
+
+  function playJump() {
+    ensureAudio();
+    tone(150, .12, .035, "triangle", 0, "effects", 310);
   }
 
   function predictShot(now) {
@@ -571,28 +703,30 @@
       const angle = baseAngle + spread;
       const dx = Math.cos(angle);
       const dy = Math.sin(angle);
-      const end = traceEnd(rendered.x + dx * 31, rendered.y + dy * 31, dx, dy, 820);
+      const shotHeight = (rendered.z || 0) + 48;
+      const end = traceEnd(rendered.x + dx * 31, rendered.y + dy * 31, dx, dy, 920, shotHeight);
       app.localBullets.push({
         id: `local-${now}-${spread}`,
         x1: rendered.x + dx * 31,
         y1: rendered.y + dy * 31,
         x2: end[0],
         y2: end[1],
+        z: shotHeight,
         radius: spec.radius,
         color: me.color,
         born: now,
       });
     }
     app.effects.push({ type: "muzzle", born: now, x: rendered.x, y: rendered.y, color: me.color });
-    playShot(true);
+    playShot(true, me.weapon);
   }
 
-  function traceEnd(x, y, dx, dy, range) {
+  function traceEnd(x, y, dx, dy, range, shotHeight = 48) {
     let distance = 0;
     while (distance < range) {
       distance += 8;
       const px = x + dx * distance, py = y + dy * distance;
-      if (px <= 0 || py <= 0 || px >= app.arena.width || py >= app.arena.height || wallAt(px, py) >= 0) return [px, py];
+      if (px <= 0 || py <= 0 || px >= app.arena.width || py >= app.arena.height || wallAt(px, py, shotHeight) >= 0) return [px, py];
     }
     return [x + dx * range, y + dy * range];
   }
@@ -619,7 +753,12 @@
   }
 
   function action(name) {
+    if (name === "jump") {
+      const me = app.state?.players.find((player) => player.id === app.playerId);
+      if (!me?.alive || !me.grounded || app.state?.phase !== "playing") return;
+    }
     send({ type: "action", action: name });
+    if (name === "jump") playJump();
     navigator.vibrate?.(18);
   }
 
@@ -658,12 +797,15 @@
   startRound.addEventListener("click", () => send({ type: "start" }));
   $("addBot").addEventListener("click", () => send({ type: "add_bot" }));
   $("removeBot").addEventListener("click", () => send({ type: "remove_bot" }));
+  mapSelect.addEventListener("change", () => send({ type: "select_map", map: mapSelect.value }));
+  botDifficulty.addEventListener("change", () => send({ type: "set_bot_difficulty", difficulty: botDifficulty.value }));
   weaponChooser.addEventListener("click", (event) => {
     const button = event.target.closest("[data-weapon]");
     if (button) send({ type: "choose_weapon", weapon: button.dataset.weapon });
   });
   $("dashButton").addEventListener("pointerdown", () => action("dash"));
   $("shieldButton").addEventListener("pointerdown", () => action("shield"));
+  jumpButton.addEventListener("pointerdown", () => action("jump"));
   $("fullscreen").addEventListener("click", toggleFullscreen);
   $("soundToggle").addEventListener("click", toggleSound);
   $("soundToggle").textContent = app.audioMuted ? "×♪" : "♪";
@@ -679,13 +821,13 @@
   window.addEventListener("keydown", (event) => {
     if ([" ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) event.preventDefault();
     app.keys.add(event.key.toLowerCase());
-    if (event.key === " ") beginShooting();
+    if (event.repeat) return;
+    if (event.key === " ") action("jump");
     if (event.key.toLowerCase() === "e") action("shield");
     if (event.key.toLowerCase() === "shift") action("dash");
   });
   window.addEventListener("keyup", (event) => {
     app.keys.delete(event.key.toLowerCase());
-    if (event.key === " ") endShooting();
   });
 
   function releaseInput() {
@@ -730,11 +872,19 @@
     canvas.height = Math.round(innerHeight * dpr);
     canvas.style.width = `${innerWidth}px`;
     canvas.style.height = `${innerHeight}px`;
+    fitMinimap();
+  }
+
+  function fitMinimap() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
     const mapRect = minimap.getBoundingClientRect();
-    minimap.width = Math.max(1, Math.round(mapRect.width * dpr));
-    minimap.height = Math.max(1, Math.round(mapRect.height * dpr));
+    const width = Math.max(1, Math.round(mapRect.width * dpr));
+    const height = Math.max(1, Math.round(mapRect.height * dpr));
+    if (minimap.width !== width) minimap.width = width;
+    if (minimap.height !== height) minimap.height = height;
   }
   addEventListener("resize", fit);
+  if ("ResizeObserver" in window) new ResizeObserver(fitMinimap).observe(minimap);
   fit();
 
   function transform() {
@@ -837,9 +987,12 @@
     drawWeaponView(camera.me, now, app.moveVisual, bob);
   }
 
-  function wallAt(x, y) {
+  function wallAt(x, y, rayHeight = 0) {
     if (x <= 2 || y <= 2 || x >= app.arena.width - 2 || y >= app.arena.height - 2) return -1;
-    return app.arena.obstacles.findIndex((rect) => x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h);
+    return app.arena.obstacles.findIndex((rect) =>
+      (Number(rect.height) || 100) >= rayHeight &&
+      x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h
+    );
   }
 
   function drawRaycastWalls(camera, horizon) {
@@ -854,7 +1007,7 @@
       let distance = 12, hit = null, hitX = 0, hitY = 0;
       while (distance < 1300) {
         hitX = camera.me.x + dx * distance; hitY = camera.me.y + dy * distance;
-        const index = wallAt(hitX, hitY);
+        const index = wallAt(hitX, hitY, (camera.me.z || 0) + 62);
         if (index !== null && index !== undefined && index !== -999 && (index >= 0 || hitX <= 2 || hitY <= 2 || hitX >= app.arena.width - 2 || hitY >= app.arena.height - 2)) { hit = index; break; }
         distance += 7;
       }
@@ -937,16 +1090,36 @@
 
   function drawMinimap() {
     const dpr = Math.min(devicePixelRatio || 1, 2), width = minimap.width, height = minimap.height, pad = 8 * dpr;
+    if (width <= 2 || height <= 2) return;
     const sx = (width - pad * 2) / app.arena.width, sy = (height - pad * 2) / app.arena.height;
-    mapCtx.clearRect(0, 0, width, height); mapCtx.fillStyle = "rgba(2,8,18,.92)"; mapCtx.fillRect(0, 0, width, height); mapCtx.strokeStyle = "rgba(32,217,255,.24)"; mapCtx.lineWidth = dpr;
-    for (const rect of app.arena.obstacles) { mapCtx.fillStyle = "#17304a"; mapCtx.fillRect(pad + rect.x * sx, pad + rect.y * sy, rect.w * sx, rect.h * sy); mapCtx.strokeRect(pad + rect.x * sx, pad + rect.y * sy, rect.w * sx, rect.h * sy); }
+    const accent = app.arena.theme?.accent || "#20d9ff";
+    mapCtx.clearRect(0, 0, width, height);
+    mapCtx.fillStyle = "rgba(2,8,18,.96)";
+    mapCtx.fillRect(0, 0, width, height);
+    mapCtx.strokeStyle = "rgba(88,205,238,.11)";
+    mapCtx.lineWidth = Math.max(1, dpr * .6);
+    for (let column = 1; column < 6; column++) {
+      const x = pad + (width - pad * 2) * column / 6;
+      mapCtx.beginPath(); mapCtx.moveTo(x, pad); mapCtx.lineTo(x, height - pad); mapCtx.stroke();
+    }
+    for (let row = 1; row < 4; row++) {
+      const y = pad + (height - pad * 2) * row / 4;
+      mapCtx.beginPath(); mapCtx.moveTo(pad, y); mapCtx.lineTo(width - pad, y); mapCtx.stroke();
+    }
+    mapCtx.strokeStyle = `${accent}88`;
+    mapCtx.lineWidth = dpr;
+    for (const rect of app.arena.obstacles) {
+      mapCtx.fillStyle = Number(rect.height) <= 65 ? "#28536a" : "#142d45";
+      mapCtx.fillRect(pad + rect.x * sx, pad + rect.y * sy, Math.max(1, rect.w * sx), Math.max(1, rect.h * sy));
+      mapCtx.strokeRect(pad + rect.x * sx, pad + rect.y * sy, Math.max(1, rect.w * sx), Math.max(1, rect.h * sy));
+    }
     for (const player of app.state.players) {
       if (!player.alive || (player.radarHidden && player.id !== app.playerId)) continue;
       const x = pad + player.x * sx, y = pad + player.y * sy;
-      mapCtx.fillStyle = player.id === app.playerId ? "#fff" : player.color; mapCtx.shadowColor = player.color; mapCtx.shadowBlur = 5 * dpr; mapCtx.beginPath(); mapCtx.arc(x, y, (player.id === app.playerId ? 4 : 3) * dpr, 0, Math.PI * 2); mapCtx.fill();
+      mapCtx.fillStyle = player.id === app.playerId ? "#fff" : player.color; mapCtx.shadowColor = player.color; mapCtx.shadowBlur = 5 * dpr; mapCtx.beginPath(); mapCtx.arc(x, y, (player.id === app.playerId ? 4.5 : 3.4) * dpr, 0, Math.PI * 2); mapCtx.fill();
       if (player.id === app.playerId) { const angle = app.cameraAngle; mapCtx.strokeStyle = player.color; mapCtx.beginPath(); mapCtx.moveTo(x, y); mapCtx.lineTo(x + Math.cos(angle) * 13 * dpr, y + Math.sin(angle) * 13 * dpr); mapCtx.stroke(); }
     }
-    mapCtx.shadowBlur = 0; mapCtx.strokeStyle = "rgba(32,217,255,.65)"; mapCtx.strokeRect(.5, .5, width - 1, height - 1);
+    mapCtx.shadowBlur = 0; mapCtx.strokeStyle = accent; mapCtx.lineWidth = dpr; mapCtx.strokeRect(.5 * dpr, .5 * dpr, width - dpr, height - dpr);
   }
 
   function drawBackground(now) {
@@ -991,16 +1164,16 @@
   function smoothPlayer(player, dt) {
     let rendered = app.renderPlayers.get(player.id);
     if (!rendered || Math.hypot(rendered.x - player.x, rendered.y - player.y) > 120) {
-      rendered = { x: player.x, y: player.y };
+      rendered = { x: player.x, y: player.y, z: player.z || 0 };
       app.renderPlayers.set(player.id, rendered);
     }
 
     if (player.id === app.playerId && player.alive && app.state.phase === "playing") {
       let speed = 285 * (player.speedBoost ? 1.55 : 1) * (player.dashing ? 2.55 : 1);
       const nextX = Math.max(21, Math.min(app.arena.width - 21, rendered.x + app.move[0] * speed * dt));
-      if (isClearLocal(nextX, rendered.y)) rendered.x = nextX;
+      if (isClearLocal(nextX, rendered.y, rendered.z)) rendered.x = nextX;
       const nextY = Math.max(21, Math.min(app.arena.height - 21, rendered.y + app.move[1] * speed * dt));
-      if (isClearLocal(rendered.x, nextY)) rendered.y = nextY;
+      if (isClearLocal(rendered.x, nextY, rendered.z)) rendered.y = nextY;
       const error = Math.hypot(player.x - rendered.x, player.y - rendered.y);
       if (error > 70) {
         rendered.x = player.x;
@@ -1016,11 +1189,14 @@
       rendered.x += (player.x - rendered.x) * interpolation;
       rendered.y += (player.y - rendered.y) * interpolation;
     }
-    return { ...player, x: rendered.x, y: rendered.y };
+    const verticalInterpolation = 1 - Math.exp(-24 * dt);
+    rendered.z += ((player.z || 0) - rendered.z) * verticalInterpolation;
+    return { ...player, x: rendered.x, y: rendered.y, z: rendered.z };
   }
 
-  function isClearLocal(x, y) {
+  function isClearLocal(x, y, z = 0) {
     return !app.arena.obstacles.some((rect) => {
+      if ((Number(rect.height) || 100) <= z + 7) return false;
       const nearestX = Math.max(rect.x, Math.min(x, rect.x + rect.w));
       const nearestY = Math.max(rect.y, Math.min(y, rect.y + rect.h));
       return (x - nearestX) ** 2 + (y - nearestY) ** 2 < 21 ** 2;

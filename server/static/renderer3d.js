@@ -31,6 +31,7 @@
   const FRAGMENT_SHADER = `
     precision mediump float;
     uniform vec3 uColor;
+    uniform vec3 uFog;
     uniform vec3 uCamera;
     uniform float uMaterial;
     uniform float uTime;
@@ -81,8 +82,8 @@
         color = uColor * diffuse + vec3(0.03, 0.13, 0.17) * edge;
       }
 
-      float fog = smoothstep(690.0, 1450.0, distanceToCamera);
-      color = mix(color, vec3(0.035, 0.13, 0.21), fog * 0.72);
+      float fog = smoothstep(820.0, 2250.0, distanceToCamera);
+      color = mix(color, uFog, fog * 0.76);
       color = pow(max(color, vec3(0.0)), vec3(0.92));
       gl_FragColor = vec4(color, 1.0);
     }
@@ -190,6 +191,7 @@
       size: gl.getUniformLocation(program, "uSize"),
       yaw: gl.getUniformLocation(program, "uYaw"),
       color: gl.getUniformLocation(program, "uColor"),
+      fog: gl.getUniformLocation(program, "uFog"),
       material: gl.getUniformLocation(program, "uMaterial"),
       camera: gl.getUniformLocation(program, "uCamera"),
       time: gl.getUniformLocation(program, "uTime"),
@@ -225,34 +227,61 @@
       drawBox([wall.x + wall.w, height + 0.65, cz], [1.4, thickness, wall.h + 1.5], color, 2);
     };
 
-    const renderPlayer = (player, now) => {
+    const renderPlayer = (player, now, detailed = true) => {
       const yaw = Math.atan2(player.aim?.[1] || 0, player.aim?.[0] || 1);
       const forward = [Math.cos(yaw), Math.sin(yaw)];
       const right = [-forward[1], forward[0]];
+      const baseHeight = Number(player.z) || 0;
       const at = (front, side, height) => [
         player.x + forward[0] * front + right[0] * side,
-        height,
+        baseHeight + height,
         player.y + forward[1] * front + right[1] * side,
       ];
-      const stride = Math.sin(now * 0.012 + player.x * 0.025 + player.y * 0.018) * 2.2;
+      const stride = Math.sin(now * 0.011 + player.x * 0.025 + player.y * 0.018) * 2.6;
       const accent = player.color;
 
-      drawBox(at(stride, -5.7, 13), [8.5, 26, 9.5], "#121c27", 4, yaw);
-      drawBox(at(-stride, 5.7, 13), [8.5, 26, 9.5], "#121c27", 4, yaw);
-      drawBox(at(0, -5.7, 4), [10.5, 7, 14], accent, 2, yaw);
-      drawBox(at(0, 5.7, 4), [10.5, 7, 14], accent, 2, yaw);
-      drawBox(at(0, 0, 36), [25, 25, 14], "#111d28", 4, yaw);
-      drawBox(at(5.5, 0, 39), [17, 17, 15.5], accent, 2, yaw);
-      drawBox(at(-1, -15, 39), [10, 11, 10], accent, 4, yaw);
-      drawBox(at(-1, 15, 39), [10, 11, 10], accent, 4, yaw);
-      drawBox(at(8, -16, 34), [23, 6.5, 7], "#192834", 4, yaw);
-      drawBox(at(8, 16, 34), [23, 6.5, 7], "#192834", 4, yaw);
-      drawBox(at(0, 0, 58), [18, 18, 18], "#14222e", 4, yaw);
-      drawBox(at(9.3, 0, 60), [1.5, 9, 13], accent, 2, yaw);
-      drawBox(at(2, 0, 69), [20, 3, 20], accent, 2, yaw);
-      drawBox(at(20, 13, 38), [32, 7, 8], "#101923", 4, yaw);
-      drawBox(at(39, 13, 38), [22, 4.5, 5], accent, 2, yaw);
-      drawBox(at(26, 13, 44), [8, 4, 7], accent, 2, yaw);
+      if (!detailed) {
+        // Low-detail silhouette keeps distant combatants readable without
+        // spending dozens of draw calls per player on mobile GPUs.
+        drawBox(at(stride, -6, 13), [10, 26, 11], "#101923", 4, yaw);
+        drawBox(at(-stride, 6, 13), [10, 26, 11], "#101923", 4, yaw);
+        drawBox(at(0, 0, 39), [27, 30, 16], "#111d28", 4, yaw);
+        drawBox(at(7, 0, 42), [19, 18, 17], accent, 2, yaw);
+        drawBox(at(0, 0, 62), [20, 20, 20], "#101f2b", 4, yaw);
+        drawBox(at(11, 0, 64), [2, 14, 8], accent, 2, yaw);
+        drawBox(at(29, 12, 39), [48, 7, 8], "#0b131c", 4, yaw);
+        drawBox(at(51, 12, 39), [20, 4, 5], accent, 2, yaw);
+        if (player.shield) drawBox(at(0, 0, 76), [43, 1.5, 43], "#8cf5ff", 2, yaw);
+        return;
+      }
+
+      // Armoured neon operative: articulated boots/legs, torso plates,
+      // shoulder pads, backpack, helmet/visor and a two-handed rifle.
+      drawBox(at(stride, -6.2, 13), [9.5, 26, 10.5], "#101923", 4, yaw);
+      drawBox(at(-stride, 6.2, 13), [9.5, 26, 10.5], "#101923", 4, yaw);
+      drawBox(at(2, -6.2, 3.5), [13, 7, 16], "#071019", 4, yaw);
+      drawBox(at(2, 6.2, 3.5), [13, 7, 16], "#071019", 4, yaw);
+      drawBox(at(5, -6.2, 6), [11, 2.4, 13], accent, 2, yaw);
+      drawBox(at(5, 6.2, 6), [11, 2.4, 13], accent, 2, yaw);
+      drawBox(at(-1, 0, 29), [20, 8, 14], "#0b151f", 4, yaw);
+      drawBox(at(0, 0, 40), [27, 26, 15], "#111d28", 4, yaw);
+      drawBox(at(7, 0, 42), [19, 18, 16.5], accent, 2, yaw);
+      drawBox(at(8.5, 0, 42), [2.2, 11, 12], "#e5fcff", 2, yaw);
+      drawBox(at(-8, 0, 43), [12, 23, 19], "#08131e", 4, yaw);
+      drawBox(at(-1, -16, 44), [12, 12, 12], accent, 4, yaw);
+      drawBox(at(-1, 16, 44), [12, 12, 12], accent, 4, yaw);
+      drawBox(at(10, -17, 37), [25, 7.5, 8], "#192834", 4, yaw);
+      drawBox(at(10, 17, 37), [25, 7.5, 8], "#192834", 4, yaw);
+      drawBox(at(22, -17, 37), [7, 9, 9], "#0a1119", 4, yaw);
+      drawBox(at(22, 17, 37), [7, 9, 9], "#0a1119", 4, yaw);
+      drawBox(at(0, 0, 61), [19, 19, 19], "#101f2b", 4, yaw);
+      drawBox(at(2, 0, 69), [22, 5, 20], "#0a151f", 4, yaw);
+      drawBox(at(10.2, 0, 62), [1.8, 12, 8], "#d7fbff", 2, yaw);
+      drawBox(at(10.8, 0, 66), [2.1, 15, 3], accent, 2, yaw);
+      drawBox(at(25, 12.5, 39), [35, 8, 9], "#0b131c", 4, yaw);
+      drawBox(at(47, 12.5, 39), [28, 5, 5.5], accent, 2, yaw);
+      drawBox(at(31, 12.5, 46), [12, 4.5, 8], "#0a1119", 4, yaw);
+      drawBox(at(18, 12.5, 34), [10, 5, 14], "#111e28", 4, yaw);
 
       if (player.speedBoost) drawBox(at(-15, 0, 28), [4, 38, 31], "#ffd52a", 2, yaw);
       if (player.shield) {
@@ -276,37 +305,44 @@
       }
 
       gl.viewport(0, 0, width, height);
-      gl.clearColor(0.018, 0.095, 0.16, 1);
+      const theme = scene.arena.theme || {};
+      const sky = rgb(theme.sky || "#071d36");
+      gl.clearColor(sky[0], sky[1], sky[2], 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       const movement = Math.min(1, Math.hypot(scene.move[0], scene.move[1]));
       const bob = Math.sin(scene.now * 0.0105) * 0.9 * movement;
-      const eye = [scene.me.x, 63 + bob, scene.me.y];
+      const eye = [scene.me.x, 63 + (Number(scene.me.z) || 0) + bob, scene.me.y];
       const cp = Math.cos(scene.pitch), sp = Math.sin(scene.pitch);
       const ca = Math.cos(scene.angle), sa = Math.sin(scene.angle);
       const forward = [ca * cp, sp, sa * cp];
       const target = [eye[0] + forward[0] * 120, eye[1] + forward[1] * 120, eye[2] + forward[2] * 120];
       const viewProjection = multiply(
-        perspective(Math.PI * 0.405, width / height, 1.8, 1750),
+        perspective(Math.PI * 0.405, width / height, 1.8, 2600),
         lookAt(eye, target, [0, 1, 0])
       );
       gl.useProgram(program);
       gl.uniformMatrix4fv(locations.vp, false, viewProjection);
       gl.uniform3fv(locations.camera, eye);
+      gl.uniform3fv(locations.fog, rgb(theme.fog || "#06334b"));
       gl.uniform1f(locations.time, scene.now);
 
-      drawBox([scene.arena.width / 2, -3, scene.arena.height / 2], [scene.arena.width, 6, scene.arena.height], "#131e29", 3);
+      drawBox([scene.arena.width / 2, -3, scene.arena.height / 2], [scene.arena.width, 6, scene.arena.height], theme.floor || "#131e29", 3);
 
       const wallColors = ["#273541", "#303945", "#293843", "#343b42"];
+      const wallVisibility = mobile ? 1900 : 2600;
       scene.arena.obstacles.forEach((wall, index) => {
-        const wallHeight = Math.max(42, Math.min(96, Number(wall.height) || (index % 5 === 2 ? 56 : 76)));
+        const nearestX = Math.max(wall.x, Math.min(scene.me.x, wall.x + wall.w));
+        const nearestZ = Math.max(wall.y, Math.min(scene.me.y, wall.y + wall.h));
+        if (Math.hypot(nearestX - scene.me.x, nearestZ - scene.me.y) > wallVisibility) return;
+        const wallHeight = Math.max(38, Math.min(170, Number(wall.height) || (index % 5 === 2 ? 56 : 110)));
         const color = wallColors[index % wallColors.length];
-        const accent = index % 3 === 1 ? "#ff2da6" : "#20d9ff";
+        const accent = index % 3 === 1 ? (theme.accent2 || "#ff2da6") : (theme.accent || "#20d9ff");
         drawBox([wall.x + wall.w / 2, wallHeight / 2, wall.y + wall.h / 2], [wall.w, wallHeight, wall.h], color, 1);
         drawWallEdges(wall, wallHeight, accent);
       });
 
       const boundaryColor = "#26333e";
-      const boundaryHeight = 86;
+      const boundaryHeight = 150;
       const boundaries = [
         { x: -12, y: -8, w: scene.arena.width + 24, h: 16 },
         { x: -12, y: scene.arena.height - 8, w: scene.arena.width + 24, h: 16 },
@@ -318,6 +354,7 @@
       }
 
       for (const item of scene.powerups) {
+        if (Math.hypot(item.x - scene.me.x, item.y - scene.me.y) > 1800) continue;
         const colors = { speed:"#ffd52a", health:"#ff4f6f", shield:"#20d9ff", weapon:"#ff2da6", stealth:"#9b66ff" };
         const itemHeight = 22 + Math.sin(scene.now * 0.0045 + item.x) * 4;
         drawBox([item.x, itemHeight, item.y], [19, 19, 19], colors[item.kind] || "#fff", 2, scene.now * 0.0017);
@@ -325,7 +362,9 @@
       }
 
       for (const player of scene.players) {
-        if (player.id !== scene.me.id && player.alive) renderPlayer(player, scene.now);
+        if (player.id === scene.me.id || !player.alive) continue;
+        const distance = Math.hypot(player.x - scene.me.x, player.y - scene.me.y);
+        if (distance <= 2000) renderPlayer(player, scene.now, !mobile || distance < 820);
       }
 
       for (const trace of scene.traces) {
@@ -337,8 +376,9 @@
         const length = Math.hypot(dx, dz);
         if (length > 0.5) {
           const color = trace.hit ? "#fff29a" : (trace.color || "#fff");
-          drawBox([(x1 + x2) / 2, 48, (z1 + z2) / 2], [length, 1.35, 1.35], color, 2, Math.atan2(dz, dx));
-          drawBox([x2, 48, z2], [trace.hit ? 5 : 2.5, trace.hit ? 5 : 2.5, trace.hit ? 5 : 2.5], color, 2, scene.now * 0.01);
+          const traceHeight = Number(trace.z) || 48;
+          drawBox([(x1 + x2) / 2, traceHeight, (z1 + z2) / 2], [length, 1.35, 1.35], color, 2, Math.atan2(dz, dx));
+          drawBox([x2, traceHeight, z2], [trace.hit ? 5 : 2.5, trace.hit ? 5 : 2.5, trace.hit ? 5 : 2.5], color, 2, scene.now * 0.01);
         }
       }
 

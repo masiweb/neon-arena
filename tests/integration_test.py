@@ -45,12 +45,19 @@ async def main() -> None:
         welcome_one = await receive_type(first, "welcome")
         welcome_two = await receive_type(second, "welcome")
         assert welcome_one["room"] == code == welcome_two["room"]
+        assert len(welcome_one["maps"]) == 6
+        assert {level["id"] for level in welcome_one["botDifficulties"]} == {"easy", "normal", "hard"}
+        await first.send(json.dumps({"type": "select_map", "map": "reactor"}))
+        arena_update = await receive_type(first, "arena")
+        assert arena_update["arena"]["id"] == "reactor"
+        assert arena_update["arena"]["width"] == 3600
+        await first.send(json.dumps({"type": "set_bot_difficulty", "difficulty": "hard"}))
         await first.send(json.dumps({"type": "add_bot"}))
         bot_state = None
         async with asyncio.timeout(7.0):
             while bot_state is None:
                 candidate = await receive_type(first, "state")
-                if any(player.get("bot") for player in candidate["players"]):
+                if candidate["mapId"] == "reactor" and candidate["botDifficulty"] == "hard" and any(player.get("bot") for player in candidate["players"]):
                     bot_state = candidate
         assert sum(1 for player in bot_state["players"] if player["bot"]) == 1
         await first.send(json.dumps({"type": "start"}))
@@ -66,10 +73,20 @@ async def main() -> None:
         assert "powerups" in playing
 
         me_before = next(player for player in playing["players"] if player["id"] == welcome_one["playerId"])
+        await first.send(json.dumps({"type": "action", "action": "jump"}))
+        jumping_me = None
+        async with asyncio.timeout(3.0):
+            while jumping_me is None or jumping_me["z"] <= 0:
+                jumping = await receive_type(first, "state")
+                jumping_me = next(player for player in jumping["players"] if player["id"] == welcome_one["playerId"])
+        assert jumping_me["z"] > 0
         await first.send(json.dumps({"type": "input", "seq": 1, "move": [1, 0], "aim": [1, 0], "shooting": True}))
-        await asyncio.sleep(0.35)
-        moved = await receive_type(first, "state")
-        me_after = next(player for player in moved["players"] if player["id"] == welcome_one["playerId"])
+        moved = None
+        me_after = None
+        async with asyncio.timeout(3.0):
+            while moved is None or me_after is None or me_after["ack"] < 1 or not moved["bullets"]:
+                moved = await receive_type(first, "state")
+                me_after = next(player for player in moved["players"] if player["id"] == welcome_one["playerId"])
         assert me_after["x"] >= me_before["x"]
         assert me_after["ack"] == 1
         assert moved["bullets"]
