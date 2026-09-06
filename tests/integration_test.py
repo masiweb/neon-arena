@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import urllib.request
+import urllib.error
 import uuid
 
 import websockets
@@ -53,6 +54,20 @@ async def main() -> None:
     assert ad["ad"]["title"] == "Integration ad"
     audit = await asyncio.to_thread(http_json, "GET", "/api/admin/audit", None, one["token"])
     assert audit["logs"]
+    forced_email = f"admin-{unique}@example.com"
+    forced_username = f"boss_{unique}"
+    await asyncio.to_thread(database.create_admin, forced_email, forced_username, "Initial#Admin9876")
+    forced_login = await asyncio.to_thread(http_json, "POST", "/api/admin/auth/login", {"identifier":forced_username,"password":"Initial#Admin9876"})
+    assert forced_login["user"]["mustChangePassword"] is True
+    try:
+        await asyncio.to_thread(http_json, "GET", "/api/admin/stats", None, forced_login["token"])
+        raise AssertionError("forced-change admin accessed a protected endpoint")
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 428
+    changed_admin = await asyncio.to_thread(http_json, "POST", "/api/admin/password", {"currentPassword":"Initial#Admin9876","newPassword":"Final#Admin654321"}, forced_login["token"])
+    assert changed_admin["user"]["mustChangePassword"] is False
+    changed_stats = await asyncio.to_thread(http_json, "GET", "/api/admin/stats", None, changed_admin["token"])
+    assert changed_stats["users"] == 3
     team = await asyncio.to_thread(http_json, "POST", "/api/teams", {"name":"Integration Six"}, one["token"])
     await asyncio.to_thread(http_json, "POST", "/api/teams/join", {"inviteCode":team["team"]["inviteCode"]}, two["token"])
     room = await asyncio.to_thread(http_json, "POST", "/api/rooms", None, one["token"])

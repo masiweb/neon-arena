@@ -73,6 +73,34 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(rewarded["gamesPlayed"], 1)
         self.assertEqual(rewarded["wins"], 1)
 
+    def test_initial_admin_must_change_password_and_old_sessions_are_revoked(self) -> None:
+        admin = self.database.create_admin(
+            "control@example.com",
+            "neon_control",
+            "Initial#Control987",
+        )
+        self.assertTrue(admin["isAdmin"])
+        self.assertTrue(admin["mustChangePassword"])
+        self.assertEqual(admin["gold"], 0)
+
+        old_token, logged_in = self.database.admin_login("neon_control", "Initial#Control987")
+        self.assertTrue(logged_in["mustChangePassword"])
+        with self.assertRaises(AccountError):
+            self.database.change_admin_password(admin["id"], "wrong-password", "Final#Control6543")
+
+        new_token, changed = self.database.change_admin_password(
+            admin["id"],
+            "Initial#Control987",
+            "Final#Control6543",
+        )
+        self.assertFalse(changed["mustChangePassword"])
+        self.assertIsNotNone(changed["passwordChangedAt"])
+        self.assertIsNone(self.database.user_from_token(old_token))
+        self.assertTrue(self.database.user_from_token(new_token))
+        with self.assertRaises(AccountError):
+            self.database.admin_login("control@example.com", "Initial#Control987")
+        self.assertTrue(self.database.admin_login("control@example.com", "Final#Control6543")[0])
+
 
 if __name__ == "__main__":
     unittest.main()

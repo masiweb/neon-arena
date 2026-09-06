@@ -23,7 +23,7 @@ from .game import GameHub
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 ROOM_RE = re.compile(r"^[A-HJ-NP-Z2-9]{4}$")
-GAME_VERSION = "3.1.0"
+GAME_VERSION = "3.2.0"
 PROTOCOL_VERSION = "9"
 PUBLIC_ORIGIN = os.environ.get("NEON_PUBLIC_ORIGIN", "https://game.chanelchat.ir").rstrip("/")
 
@@ -50,6 +50,16 @@ class RegisterBody(BaseModel):
 class LoginBody(BaseModel):
     email: str = Field(max_length=254)
     password: str = Field(max_length=128)
+
+
+class AdminLoginBody(BaseModel):
+    identifier: str = Field(min_length=3, max_length=254)
+    password: str = Field(max_length=128)
+
+
+class AdminPasswordBody(BaseModel):
+    currentPassword: str = Field(max_length=128)
+    newPassword: str = Field(min_length=14, max_length=128)
 
 
 class ForgotBody(BaseModel):
@@ -154,6 +164,8 @@ def current_user(authorization: str | None = Header(default=None)) -> dict[str, 
 def current_admin(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     if not user["isAdmin"]:
         raise HTTPException(status_code=403, detail="دسترسی مدیر لازم است")
+    if user["mustChangePassword"]:
+        raise HTTPException(status_code=428, detail="پیش از ادامه باید رمز اولیه مدیریت را تغییر دهید")
     return user
 
 
@@ -213,6 +225,16 @@ async def login(body: LoginBody, request: Request) -> dict[str, Any]:
     auth_limiter.check(f"login:{client_ip(request)}", limit=12, window=300)
     try:
         token, user = await asyncio.to_thread(database.login, body.email, body.password)
+        return {"token": token, "user": user}
+    except AccountError as exc:
+        raise fail(exc, 401) from exc
+
+
+@app.post("/api/admin/auth/login")
+async def admin_login(body: AdminLoginBody, request: Request) -> dict[str, Any]:
+    auth_limiter.check(f"admin-login:{client_ip(request)}", limit=8, window=600)
+    try:
+        token, user = await asyncio.to_thread(database.admin_login, body.identifier, body.password)
         return {"token": token, "user": user}
     except AccountError as exc:
         raise fail(exc, 401) from exc
@@ -401,6 +423,22 @@ async def admin_stats(_admin: dict[str, Any] = Depends(current_admin)) -> dict[s
     return {**(await asyncio.to_thread(database.admin_stats)), "onlineRooms": hub.stats()["rooms"], "onlinePlayers": hub.stats()["players"]}
 
 
+@app.post("/api/admin/password")
+async def admin_change_password(body: AdminPasswordBody, user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    if not user["isAdmin"]:
+        raise HTTPException(status_code=403, detail="دسترسی مدیر لازم است")
+    try:
+        token, updated = await asyncio.to_thread(
+            database.change_admin_password,
+            user["id"],
+            body.currentPassword,
+            body.newPassword,
+        )
+        return {"ok": True, "token": token, "user": updated}
+    except AccountError as exc:
+        raise fail(exc) from exc
+
+
 @app.get("/api/admin/users")
 async def admin_users(q: str = Query(default="", max_length=100), _admin: dict[str, Any] = Depends(current_admin)) -> dict[str, Any]:
     return {"users": await asyncio.to_thread(database.admin_users, q)}
@@ -537,7 +575,10 @@ async def game_socket(socket: WebSocket, code: str) -> None:
 
 @app.get("/admin")
 async def admin_page() -> FileResponse:
-    return FileResponse(STATIC_DIR / "admin.html")
+    return FileResponse(
+        STATIC_DIR / "admin.html",
+        headers={"Cache-Control": "no-store", "X-Frame-Options": "DENY"},
+    )
 
 
 @app.get("/")

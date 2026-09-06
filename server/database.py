@@ -73,6 +73,20 @@ def validate_password(value: str) -> str:
     return value
 
 
+def validate_admin_password(value: str) -> str:
+    if len(value) < 14 or len(value) > 128:
+        raise AccountError("رمز مدیریت باید حداقل ۱۴ کاراکتر باشد")
+    checks = (
+        any(char.islower() for char in value),
+        any(char.isupper() for char in value),
+        any(char.isdigit() for char in value),
+        any(not char.isalnum() for char in value),
+    )
+    if not all(checks):
+        raise AccountError("رمز مدیریت باید شامل حروف بزرگ و کوچک، عدد و نماد باشد")
+    return value
+
+
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32)
@@ -147,6 +161,8 @@ class Database:
                     referral_code TEXT NOT NULL UNIQUE,
                     referred_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
                     is_admin INTEGER NOT NULL DEFAULT 0,
+                    must_change_password INTEGER NOT NULL DEFAULT 0,
+                    password_changed_at INTEGER,
                     is_active INTEGER NOT NULL DEFAULT 1,
                     gold INTEGER NOT NULL DEFAULT 250 CHECK(gold >= 0),
                     diamonds INTEGER NOT NULL DEFAULT 0 CHECK(diamonds >= 0),
@@ -288,6 +304,11 @@ class Database:
                 );
                 """
             )
+            user_columns = {row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()}
+            if "must_change_password" not in user_columns:
+                db.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0")
+            if "password_changed_at" not in user_columns:
+                db.execute("ALTER TABLE users ADD COLUMN password_changed_at INTEGER")
             self._seed_products(db)
 
     def _seed_products(self, db: sqlite3.Connection) -> None:
@@ -385,6 +406,50 @@ class Database:
             db.commit()
         return token, self.get_user(int(row["id"]))
 
+    def admin_login(self, identifier: str, password: str) -> tuple[str, dict[str, Any]]:
+        normalized = unicodedata.normalize("NFKC", identifier).strip().casefold()
+        if not normalized or len(normalized) > 254:
+            raise AccountError("نام کاربری یا رمز عبور اشتباه است")
+        with self.connection() as db:
+            row = db.execute(
+                "SELECT * FROM users WHERE email=? OR username_key=?",
+                (normalized, normalized),
+            ).fetchone()
+            if (
+                not row
+                or not row["is_active"]
+                or not row["is_admin"]
+                or not verify_password(password, row["password_hash"])
+            ):
+                raise AccountError("نام کاربری یا رمز عبور اشتباه است")
+            db.execute("BEGIN IMMEDIATE")
+            token = self._new_session(db, int(row["id"]))
+            db.execute("UPDATE users SET last_seen=? WHERE id=?", (_now(), row["id"]))
+            db.commit()
+        return token, self.get_user(int(row["id"]))
+
+    def change_admin_password(self, user_id: int, current_password: str, new_password: str) -> tuple[str, dict[str, Any]]:
+        validate_admin_password(new_password)
+        now = _now()
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            if not row or not row["is_active"] or not row["is_admin"]:
+                raise AccountError("حساب مدیریت پیدا نشد")
+            if not verify_password(current_password, row["password_hash"]):
+                raise AccountError("رمز فعلی اشتباه است")
+            if verify_password(new_password, row["password_hash"]):
+                raise AccountError("رمز جدید باید با رمز فعلی متفاوت باشد")
+            db.execute(
+                "UPDATE users SET password_hash=?,must_change_password=0,password_changed_at=? WHERE id=?",
+                (hash_password(new_password), now, user_id),
+            )
+            db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            token = self._new_session(db, user_id)
+            self._audit(db, user_id, "admin_password_change", "user", str(user_id), "all_previous_sessions_revoked")
+            db.commit()
+        return token, self.get_user(user_id)
+
     def logout(self, token: str) -> None:
         if not token:
             return
@@ -440,6 +505,8 @@ class Database:
                 "email": row["email"],
                 "referralCode": row["referral_code"],
                 "isAdmin": bool(row["is_admin"]),
+                "mustChangePassword": bool(row["must_change_password"]),
+                "passwordChangedAt": int(row["password_changed_at"]) if row["password_changed_at"] else None,
                 "isActive": bool(row["is_active"]),
                 "gold": int(row["gold"]),
                 "diamonds": int(row["diamonds"]),
@@ -481,7 +548,10 @@ class Database:
             ).fetchone()
             if not row:
                 raise AccountError("لینک بازیابی نامعتبر یا منقضی شده است")
-            db.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), row["user_id"]))
+            db.execute(
+                "UPDATE users SET password_hash=?,must_change_password=0,password_changed_at=? WHERE id=?",
+                (hash_password(password), now, row["user_id"]),
+            )
             db.execute("UPDATE password_resets SET used_at=? WHERE token_hash=?", (now, self._token_hash(token)))
             db.execute("DELETE FROM sessions WHERE user_id=?", (row["user_id"],))
             db.commit()
@@ -998,6 +1068,44 @@ class Database:
                 raise AccountError("ابتدا با این ایمیل ثبت‌نام کنید")
             row = db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
         return self.get_user(int(row["id"]))
+
+    def create_admin(self, email: str, username: str, password: str, *, force_password_change: bool = True) -> dict[str, Any]:
+        email = normalize_email(email)
+        username, username_key = normalize_username(username)
+        validate_admin_password(password)
+        now = _now()
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
+                raise AccountError("حسابی با این ایمیل وجود دارد")
+            if db.execute("SELECT 1 FROM users WHERE username_key=?", (username_key,)).fetchone():
+                raise AccountError("این نام کاربری قبلاً انتخاب شده است")
+            code = self._invite_code()
+            while db.execute("SELECT 1 FROM users WHERE referral_code=?", (code,)).fetchone():
+                code = self._invite_code()
+            cursor = db.execute(
+                """
+                INSERT INTO users
+                    (email,username,username_key,password_hash,referral_code,is_admin,must_change_password,
+                     password_changed_at,gold,created_at,last_seen)
+                VALUES (?,?,?,?,?,1,?,?,0,?,?)
+                """,
+                (
+                    email,
+                    username,
+                    username_key,
+                    hash_password(password),
+                    code,
+                    int(force_password_change),
+                    None if force_password_change else now,
+                    now,
+                    now,
+                ),
+            )
+            user_id = int(cursor.lastrowid)
+            self._audit(db, user_id, "admin_account_created", "user", str(user_id), f"force_change={force_password_change}")
+            db.commit()
+        return self.get_user(user_id)
 
     def advertisements(self, placement: str | None = None, include_inactive: bool = False) -> list[dict[str, Any]]:
         now = _now()

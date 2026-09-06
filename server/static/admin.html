@@ -1,21 +1,95 @@
 <!doctype html>
 <html lang="fa" dir="rtl">
-  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="theme-color" content="#050815" /><title>مدیریت نبرد نئون</title><link rel="stylesheet" href="/static/admin.css?v=3.1.0" /></head>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#050815" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>مدیریت نبرد نئون</title>
+    <link rel="stylesheet" href="/static/admin.css?v=3.2.0" />
+  </head>
   <body>
-    <header class="topbar"><div><small>NEON ARENA</small><h1>مرکز فرماندهی</h1></div><nav><a href="/">بازگشت به بازی</a><button id="refreshAll">به‌روزرسانی</button></nav></header>
-    <div class="shell">
-      <aside class="sidebar"><button class="active" data-page="overview">نمای کلی</button><button data-page="users">کاربران</button><button data-page="orders">سفارش‌ها</button><button data-page="products">فروشگاه</button><button data-page="ads">تبلیغات</button><button data-page="audit">گزارش مدیران</button></aside>
-      <main>
-        <div id="adminError" class="alert hidden"></div>
-        <section id="overviewPage" class="page"><div id="statsGrid" class="stats-grid"></div><article class="info-card"><h2>کنترل اقتصاد</h2><p>پاداش‌ها فقط از نتیجه‌ای که موتور رسمی سرور ثبت می‌کند پرداخت می‌شوند. خریدها تا اتصال درگاه در وضعیت «در انتظار» می‌مانند و مدیر می‌تواند پس از بررسی پرداخت آن‌ها را تأیید کند.</p></article></section>
-        <section id="usersPage" class="page hidden"><header class="page-head"><div><small>حساب‌ها</small><h2>مدیریت کاربران</h2></div><form id="userSearch"><input id="userQuery" placeholder="ایمیل یا نام کاربری" /><button>جست‌وجو</button></form></header><div id="usersTable" class="table-wrap"></div></section>
-        <section id="ordersPage" class="page hidden"><header class="page-head"><div><small>پرداخت دستی</small><h2>سفارش‌ها</h2></div></header><div id="ordersTable" class="table-wrap"></div></section>
-        <section id="productsPage" class="page hidden"><header class="page-head"><div><small>طلا و الماس</small><h2>محصولات فروشگاه</h2></div><button id="newProduct">محصول جدید</button></header><div id="productsTable" class="table-wrap"></div></section>
-        <section id="adsPage" class="page hidden"><header class="page-head"><div><small>جایگاه‌های ورود، لابی و نتیجه</small><h2>تبلیغات</h2></div><button id="newAd">تبلیغ جدید</button></header><div id="adsTable" class="table-wrap"></div></section>
-        <section id="auditPage" class="page hidden"><header class="page-head"><div><small>ثبت تغییرات حساس</small><h2>گزارش مدیران</h2></div></header><div id="auditTable" class="table-wrap"></div></section>
+    <section id="adminGate" class="auth-view">
+      <div class="auth-orbit" aria-hidden="true"><i></i><i></i><i></i></div>
+      <main class="auth-card">
+        <div class="auth-brand">
+          <div class="brand-mark" aria-hidden="true"><span></span></div>
+          <small>NEON ARENA · SECURE CONSOLE</small>
+          <h1>مرکز فرماندهی</h1>
+          <p>مدیریت کاربران، اقتصاد بازی، فروشگاه، سفارش‌ها و تبلیغات از یک پنل امن.</p>
+          <div class="security-line"><span></span> ارتباط رمزگذاری‌شده و ثبت کامل عملیات مدیر</div>
+        </div>
+
+        <div id="loginPane" class="auth-pane">
+          <header><small>ورود اختصاصی مدیر</small><h2>احراز هویت</h2></header>
+          <form id="adminLoginForm" novalidate>
+            <label>نام کاربری یا ایمیل
+              <input id="adminIdentifier" name="identifier" dir="ltr" autocomplete="username" minlength="3" maxlength="254" required autofocus />
+            </label>
+            <label>رمز عبور
+              <span class="password-field"><input id="adminPassword" name="password" type="password" dir="ltr" autocomplete="current-password" maxlength="128" required /><button class="reveal" type="button" data-reveal="adminPassword" aria-label="نمایش رمز">◉</button></span>
+            </label>
+            <div id="loginError" class="form-error hidden" role="alert"></div>
+            <button id="adminLoginButton" class="primary" type="submit">ورود به پنل</button>
+          </form>
+          <a class="back-link" href="/">بازگشت به بازی</a>
+        </div>
+
+        <div id="passwordPane" class="auth-pane hidden">
+          <header><small id="passwordEyebrow">امنیت حساب</small><h2 id="passwordTitle">تغییر رمز مدیریت</h2></header>
+          <div id="forcedPasswordNotice" class="forced-notice hidden"><b>تغییر رمز الزامی است</b><span>برای محافظت از پنل، پیش از ادامه رمز اولیه را تغییر دهید.</span></div>
+          <form id="adminPasswordForm" novalidate>
+            <label>رمز فعلی
+              <span class="password-field"><input id="currentAdminPassword" name="currentPassword" type="password" dir="ltr" autocomplete="current-password" maxlength="128" required /><button class="reveal" type="button" data-reveal="currentAdminPassword" aria-label="نمایش رمز">◉</button></span>
+            </label>
+            <label>رمز جدید
+              <span class="password-field"><input id="newAdminPassword" name="newPassword" type="password" dir="ltr" autocomplete="new-password" minlength="14" maxlength="128" required /><button class="reveal" type="button" data-reveal="newAdminPassword" aria-label="نمایش رمز">◉</button></span>
+            </label>
+            <label>تکرار رمز جدید
+              <input id="confirmAdminPassword" name="confirmPassword" type="password" dir="ltr" autocomplete="new-password" minlength="14" maxlength="128" required />
+            </label>
+            <ul class="password-rules"><li>حداقل ۱۴ کاراکتر</li><li>حرف بزرگ و کوچک</li><li>عدد و نماد</li></ul>
+            <div id="passwordError" class="form-error hidden" role="alert"></div>
+            <button id="saveAdminPassword" class="primary" type="submit">ذخیره رمز جدید</button>
+            <button id="cancelPassword" class="secondary hidden" type="button">انصراف</button>
+          </form>
+        </div>
       </main>
+    </section>
+
+    <div id="adminApp" class="hidden">
+      <header class="topbar">
+        <div class="topbar-brand"><div class="brand-mark small" aria-hidden="true"><span></span></div><div><small>NEON ARENA</small><h1>مرکز فرماندهی</h1></div></div>
+        <nav>
+          <span id="adminIdentity" class="admin-identity">—</span>
+          <button id="changePassword" type="button">تغییر رمز</button>
+          <button id="refreshAll" type="button">به‌روزرسانی</button>
+          <a href="/">بازی</a>
+          <button id="adminLogout" class="danger-outline" type="button">خروج امن</button>
+        </nav>
+      </header>
+      <div class="shell">
+        <aside class="sidebar" aria-label="منوی مدیریت">
+          <button class="active" data-page="overview">نمای کلی</button>
+          <button data-page="users">کاربران</button>
+          <button data-page="orders">سفارش‌ها</button>
+          <button data-page="products">فروشگاه</button>
+          <button data-page="ads">تبلیغات</button>
+          <button data-page="audit">گزارش مدیران</button>
+        </aside>
+        <main class="dashboard-main">
+          <div id="adminError" class="alert hidden" role="alert"></div>
+          <section id="overviewPage" class="page"><div id="statsGrid" class="stats-grid"></div><article class="info-card"><h2>کنترل اقتصاد</h2><p>پاداش‌ها فقط از نتیجه‌ای که موتور رسمی سرور ثبت می‌کند پرداخت می‌شوند. خریدها تا اتصال درگاه در وضعیت «در انتظار» می‌مانند و پس از بررسی مدیر تأیید می‌شوند.</p></article></section>
+          <section id="usersPage" class="page hidden"><header class="page-head"><div><small>حساب‌ها</small><h2>مدیریت کاربران</h2></div><form id="userSearch"><input id="userQuery" placeholder="ایمیل یا نام کاربری" /><button>جست‌وجو</button></form></header><div id="usersTable" class="table-wrap"></div></section>
+          <section id="ordersPage" class="page hidden"><header class="page-head"><div><small>پرداخت دستی</small><h2>سفارش‌ها</h2></div></header><div id="ordersTable" class="table-wrap"></div></section>
+          <section id="productsPage" class="page hidden"><header class="page-head"><div><small>طلا و الماس</small><h2>محصولات فروشگاه</h2></div><button id="newProduct">محصول جدید</button></header><div id="productsTable" class="table-wrap"></div></section>
+          <section id="adsPage" class="page hidden"><header class="page-head"><div><small>ورود، لابی و نتیجه</small><h2>تبلیغات</h2></div><button id="newAd">تبلیغ جدید</button></header><div id="adsTable" class="table-wrap"></div></section>
+          <section id="auditPage" class="page hidden"><header class="page-head"><div><small>ثبت تغییرات حساس</small><h2>گزارش مدیران</h2></div></header><div id="auditTable" class="table-wrap"></div></section>
+        </main>
+      </div>
     </div>
-    <div id="editor" class="modal hidden"><button id="editorBackdrop" class="backdrop"></button><form id="editorForm"><header><h2 id="editorTitle">ویرایش</h2><button id="closeEditor" type="button">×</button></header><div id="editorFields"></div><button class="primary" type="submit">ذخیره تغییرات</button></form></div>
-    <script src="/static/admin.js?v=3.1.0" defer></script>
+
+    <div id="editor" class="modal hidden"><button id="editorBackdrop" class="backdrop" aria-label="بستن"></button><form id="editorForm"><header><h2 id="editorTitle">ویرایش</h2><button id="closeEditor" type="button">×</button></header><div id="editorFields"></div><button class="primary" type="submit">ذخیره تغییرات</button></form></div>
+    <script src="/static/admin.js?v=3.2.0" defer></script>
   </body>
 </html>

@@ -1,6 +1,6 @@
 # نبرد نئون (Neon Arena)
 
-بازی آنلاین اول‌شخص سبک برای موبایل، APK و دسکتاپ. نسخه فعلی **3.1.0** با پروتکل شبکه **9** است.
+بازی آنلاین اول‌شخص سبک برای موبایل، APK و دسکتاپ. نسخه فعلی **3.2.0** با پروتکل شبکه **9** است.
 
 ## امکانات نسخه 3
 
@@ -61,16 +61,18 @@ sudo bash install.sh --domain game.chanelchat.ir --ssl --skip-android
 
 ## ساخت اولین مدیر
 
-ابتدا از صفحه اصلی با ایمیل خود ثبت‌نام کنید، سپس روی سرور اجرا کنید:
+حساب مدیر را مستقیماً روی سرور بسازید. رمز از ورودی استاندارد خوانده می‌شود تا داخل تاریخچهٔ Shell ذخیره نشود:
 
 ```bash
-cd /opt/neon-arena
-sudo -u neonarena \
+read -rsp 'Initial admin password: ' ADMIN_PASSWORD; echo
+printf '%s' "$ADMIN_PASSWORD" | sudo -u neonarena \
   NEON_DATABASE=/var/lib/neon-arena/neon-arena.db \
-  venv/bin/python -m server.manage promote-admin --email YOUR_EMAIL@example.com
+  /opt/neon-arena/venv/bin/python -m server.manage create-admin \
+  --email admin@example.com --username neon_admin --password-stdin
+unset ADMIN_PASSWORD
 ```
 
-بعد یک بار از حساب خارج و دوباره وارد شوید. پنل در نشانی `/admin` در دسترس است.
+پنل در نشانی `/admin` در دسترس است. حساب ساخته‌شده در اولین ورود قفل است و مدیر باید رمز اولیه را با رمزی حداقل ۱۴ کاراکتری شامل حروف بزرگ و کوچک، عدد و نماد جایگزین کند. تا آن زمان همهٔ APIهای مدیریتی پاسخ `428` می‌دهند.
 
 ## بازیابی رمز عبور با ایمیل
 
