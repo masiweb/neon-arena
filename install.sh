@@ -352,7 +352,7 @@ echo "Game: ${PUBLIC_ORIGIN}"
 echo "Health: ${PUBLIC_HEALTH}"
 echo "Admin: ${PUBLIC_ORIGIN}/admin"
 echo "Create the first admin (password is read from stdin and must be changed on first login):"
-echo "  sudo -u ${APP_USER} NEON_DATABASE=${DATA_DIR}/neon-arena.db ${APP_DIR}/venv/bin/python -m server.manage create-admin --email YOU@example.com --username neon_admin --password-stdin"
+echo "  sudo -u ${APP_USER} env PYTHONPATH=${APP_DIR} NEON_DATABASE=${DATA_DIR}/neon-arena.db ${APP_DIR}/venv/bin/python -m server.manage create-admin --email YOU@example.com --username neon_admin --password-stdin"
 if [[ "${BUILD_ANDROID}" -eq 1 ]]; then
   echo "APK (latest): ${PUBLIC_ORIGIN}/static/neon-arena-android-latest.apk"
   echo "APK (versioned): ${PUBLIC_ORIGIN}/static/${APK_NAME}"

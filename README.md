@@ -65,7 +65,8 @@ sudo bash install.sh --domain game.chanelchat.ir --ssl --skip-android
 
 ```bash
 read -rsp 'Initial admin password: ' ADMIN_PASSWORD; echo
-printf '%s' "$ADMIN_PASSWORD" | sudo -u neonarena \
+printf '%s' "$ADMIN_PASSWORD" | sudo -u neonarena env \
+  PYTHONPATH=/opt/neon-arena \
   NEON_DATABASE=/var/lib/neon-arena/neon-arena.db \
   /opt/neon-arena/venv/bin/python -m server.manage create-admin \
   --email admin@example.com --username neon_admin --password-stdin
