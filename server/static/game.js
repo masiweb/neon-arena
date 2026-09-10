@@ -1195,13 +1195,13 @@
   $("showForgot").addEventListener("click", () => showAuthView("forgot"));
   $("loginForm").addEventListener("submit", async (event) => {
     event.preventDefault(); entryError.textContent = "در حال ورود…";
-    try { setSession(await api("/api/auth/login", { method:"POST", body:{ email:$("loginEmail").value, password:$("loginPassword").value } }, false)); }
+    try { setSession(await api("/api/auth/login", { method:"POST", body:{ identifier:$("loginIdentifier").value.trim(), password:$("loginPassword").value } }, false)); }
     catch (error) { entryError.textContent = error.message; }
   });
   $("registerForm").addEventListener("submit", async (event) => {
     event.preventDefault(); entryError.textContent = "در حال ساخت حساب…";
     try {
-      setSession(await api("/api/auth/register", { method:"POST", body:{ email:$("registerEmail").value, username:$("registerUsername").value, password:$("registerPassword").value, referralCode:$("referralCode").value } }, false));
+      setSession(await api("/api/auth/register", { method:"POST", body:{ email:$("registerEmail").value.trim(), username:$("registerUsername").value.trim(), password:$("registerPassword").value, referralCode:$("referralCode").value.trim() } }, false));
       notify("حساب ساخته شد؛ ۲۵۰ طلا هدیه گرفتی");
     } catch (error) { entryError.textContent = error.message; }
   });

@@ -394,12 +394,17 @@ class Database:
             db.commit()
         return token, self.get_user(user_id)
 
-    def login(self, email: str, password: str) -> tuple[str, dict[str, Any]]:
-        email = normalize_email(email)
+    def login(self, identifier: str, password: str) -> tuple[str, dict[str, Any]]:
+        normalized = unicodedata.normalize("NFKC", identifier).strip().casefold()
+        if not normalized or len(normalized) > 254:
+            raise AccountError("ایمیل/نام کاربری یا رمز عبور اشتباه است")
         with self.connection() as db:
-            row = db.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+            row = db.execute(
+                "SELECT * FROM users WHERE email=? OR username_key=?",
+                (normalized, normalized),
+            ).fetchone()
             if not row or not row["is_active"] or not verify_password(password, row["password_hash"]):
-                raise AccountError("ایمیل یا رمز عبور اشتباه است")
+                raise AccountError("ایمیل/نام کاربری یا رمز عبور اشتباه است")
             db.execute("BEGIN IMMEDIATE")
             token = self._new_session(db, int(row["id"]))
             db.execute("UPDATE users SET last_seen=? WHERE id=?", (_now(), row["id"]))

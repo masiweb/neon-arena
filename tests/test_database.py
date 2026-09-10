@@ -31,6 +31,9 @@ class DatabaseTests(unittest.TestCase):
         with self.assertRaises(AccountError):
             self.database.login("user1@example.com", "Password1")
         self.assertTrue(self.database.login("user1@example.com", "Changed123")[0])
+        username_token, username_user = self.database.login(" PLAYER_1 ", "Changed123")
+        self.assertTrue(username_token)
+        self.assertEqual(username_user["id"], first["id"])
 
     def test_friends_blocks_and_team_limit(self) -> None:
         users = [self.register(index)[1] for index in range(1, 8)]

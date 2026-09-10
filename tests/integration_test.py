@@ -44,6 +44,10 @@ async def main() -> None:
     unique = uuid.uuid4().hex[:10]
     one = await asyncio.to_thread(http_json, "POST", "/api/auth/register", {"email":f"one-{unique}@example.com","username":f"one_{unique}","password":"Password123","referralCode":""})
     two = await asyncio.to_thread(http_json, "POST", "/api/auth/register", {"email":f"two-{unique}@example.com","username":f"two_{unique}","password":"Password123","referralCode":one["user"]["referralCode"]})
+    username_login = await asyncio.to_thread(http_json, "POST", "/api/auth/login", {"identifier":f"ONE_{unique}","password":"Password123"})
+    legacy_email_login = await asyncio.to_thread(http_json, "POST", "/api/auth/login", {"email":f"one-{unique}@example.com","password":"Password123"})
+    assert username_login["user"]["id"] == one["user"]["id"]
+    assert legacy_email_login["user"]["id"] == one["user"]["id"]
     await asyncio.to_thread(database.promote_admin, f"one-{unique}@example.com")
     me = await asyncio.to_thread(http_json, "GET", "/api/me", None, one["token"])
     assert me["user"]["gold"] == 350

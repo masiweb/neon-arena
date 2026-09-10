@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>نبرد نئون</title>
-    <link rel="stylesheet" href="/static/styles.css?v=3.2.0" />
+    <link rel="stylesheet" href="/static/styles.css?v=3.2.1" />
   </head>
   <body>
     <div id="rotateNotice" class="rotate-notice" aria-live="polite">
@@ -31,15 +31,15 @@
             <div id="authTabs" class="auth-tabs"><button type="button" data-auth-view="login" class="active">ورود</button><button type="button" data-auth-view="register">ثبت‌نام</button></div>
             <form id="loginForm" class="auth-form" autocomplete="on">
               <h2>خوش برگشتی</h2><p>برای ورود به لابی حساب خودت را باز کن.</p>
-              <label>ایمیل<input id="loginEmail" class="text-input" type="email" dir="ltr" autocomplete="email" required maxlength="254" placeholder="name@example.com" /></label>
-              <label>رمز عبور<input id="loginPassword" class="text-input" type="password" dir="ltr" autocomplete="current-password" required maxlength="128" placeholder="••••••••" /></label>
+              <label>ایمیل یا نام کاربری<input id="loginIdentifier" class="text-input" type="text" dir="ltr" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required maxlength="254" placeholder="name@example.com یا masih_hero" /></label>
+              <label>رمز عبور<input id="loginPassword" class="text-input" type="password" dir="ltr" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" required maxlength="128" placeholder="••••••••" /></label>
               <button class="button primary wide" type="submit">ورود به لابی</button><button id="showForgot" class="text-button" type="button">رمز عبورم را فراموش کرده‌ام</button>
             </form>
             <form id="registerForm" class="auth-form hidden" autocomplete="on">
               <h2>ساخت حساب مبارز</h2><p>نام کاربری در بازی به دیگران نمایش داده می‌شود.</p>
-              <label>نام کاربری<input id="registerUsername" class="text-input" autocomplete="username" required minlength="3" maxlength="20" placeholder="مثلاً masih_hero" /></label>
-              <label>ایمیل<input id="registerEmail" class="text-input" type="email" dir="ltr" autocomplete="email" required maxlength="254" placeholder="name@example.com" /></label>
-              <label>رمز عبور<input id="registerPassword" class="text-input" type="password" dir="ltr" autocomplete="new-password" required minlength="8" maxlength="128" placeholder="حداقل ۸ کاراکتر، حرف و عدد" /></label>
+              <label>نام کاربری<input id="registerUsername" class="text-input" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required minlength="3" maxlength="20" placeholder="مثلاً masih_hero" /></label>
+              <label>ایمیل<input id="registerEmail" class="text-input" type="email" dir="ltr" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" required maxlength="254" placeholder="name@example.com" /></label>
+              <label>رمز عبور<input id="registerPassword" class="text-input" type="password" dir="ltr" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" required minlength="8" maxlength="128" placeholder="حداقل ۸ کاراکتر، حرف و عدد" /></label>
               <label id="referralField">کد دعوت (اختیاری)<input id="referralCode" class="text-input" dir="ltr" maxlength="20" placeholder="INVITE" /></label>
               <button class="button primary wide" type="submit">ثبت‌نام رایگان</button>
             </form>
@@ -52,7 +52,7 @@
               <label>رمز جدید<input id="resetPassword" class="text-input" type="password" dir="ltr" autocomplete="new-password" required minlength="8" maxlength="128" /></label><button class="button primary wide" type="submit">ذخیره رمز جدید</button>
             </form>
             <div id="entryError" class="entry-error" role="alert"></div>
-            <a id="downloadAndroid" class="android-download" href="/static/neon-arena-android-latest.apk" download><b>↓ دانلود آخرین نسخه اندروید</b><span>نسخه ۳.۱.۰ · مناسب Android 7 به بالا</span></a>
+            <a id="downloadAndroid" class="android-download" href="/static/neon-arena-android-latest.apk" download><b>↓ دانلود آخرین نسخه اندروید</b><span>نسخه ۳.۲.۱ · مناسب Android 7 به بالا</span></a>
           </section>
         </div>
       </section>
@@ -102,6 +102,6 @@
         <div class="right-controls"><div class="ability-row"><button id="jumpButton" class="ability jump" type="button" aria-label="پرش" title="پرش"><span>↥</span></button></div><button id="fireButton" class="fire-button" type="button"><span>●</span><b>شلیک</b></button></div>
       </section>
     </main>
-    <script src="/static/renderer3d.js?v=3.2.0"></script><script src="/static/game.js?v=3.2.0" defer></script>
+    <script src="/static/renderer3d.js?v=3.2.1"></script><script src="/static/game.js?v=3.2.1" defer></script>
   </body>
 </html>

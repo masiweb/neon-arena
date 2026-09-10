@@ -23,7 +23,7 @@ from .game import GameHub
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 ROOM_RE = re.compile(r"^[A-HJ-NP-Z2-9]{4}$")
-GAME_VERSION = "3.2.0"
+GAME_VERSION = "3.2.1"
 PROTOCOL_VERSION = "9"
 PUBLIC_ORIGIN = os.environ.get("NEON_PUBLIC_ORIGIN", "https://game.chanelchat.ir").rstrip("/")
 
@@ -48,7 +48,8 @@ class RegisterBody(BaseModel):
 
 
 class LoginBody(BaseModel):
-    email: str = Field(max_length=254)
+    identifier: str | None = Field(default=None, max_length=254)
+    email: str | None = Field(default=None, max_length=254)
     password: str = Field(max_length=128)
 
 
@@ -224,7 +225,10 @@ async def register(body: RegisterBody, request: Request) -> dict[str, Any]:
 async def login(body: LoginBody, request: Request) -> dict[str, Any]:
     auth_limiter.check(f"login:{client_ip(request)}", limit=12, window=300)
     try:
-        token, user = await asyncio.to_thread(database.login, body.email, body.password)
+        identifier = body.identifier if body.identifier is not None else body.email
+        if not identifier:
+            raise AccountError("ایمیل یا نام کاربری را وارد کنید")
+        token, user = await asyncio.to_thread(database.login, identifier, body.password)
         return {"token": token, "user": user}
     except AccountError as exc:
         raise fail(exc, 401) from exc
