@@ -15,11 +15,12 @@ from server.game import (
     Room,
     clear_position,
     movement_vector,
+    nearby_obstacles,
     normalize,
     ray_rect_distance,
     surface_height,
 )
-from server.maps import DEFAULT_MAP_ID, MAPS, MAP_HEIGHT, MAP_WIDTH
+from server.maps import DEFAULT_MAP_ID, MAPS, MAP_HEIGHT, MAP_WIDTH, public_map
 
 
 class DummySocket:
@@ -80,16 +81,29 @@ class GameRulesTests(unittest.TestCase):
     def test_six_large_maps_are_available(self) -> None:
         self.assertEqual(len(MAPS), 6)
         self.assertIn(DEFAULT_MAP_ID, MAPS)
-        self.assertTrue(all(item["width"] == MAP_WIDTH == 3600 for item in MAPS.values()))
-        self.assertTrue(all(item["height"] == MAP_HEIGHT == 2100 for item in MAPS.values()))
-        self.assertTrue(all(item["obstacles"] for item in MAPS.values()))
+        self.assertTrue(all(item["width"] == MAP_WIDTH == 10800 for item in MAPS.values()))
+        self.assertTrue(all(item["height"] == MAP_HEIGHT == 6300 for item in MAPS.values()))
+        self.assertTrue(all(len(item["obstacles"]) >= 200 for item in MAPS.values()))
+        self.assertTrue(all(item["props"] for item in MAPS.values()))
         self.assertTrue(all(any(wall["height"] <= 65 for wall in item["obstacles"]) for item in MAPS.values()))
+        self.assertTrue(all({"wall", "barrier", "crate"} <= {wall["kind"] for wall in item["obstacles"]} for item in MAPS.values()))
         self.assertTrue(all(
             0 <= wall["x"] < wall["x"] + wall["w"] <= item["width"]
             and 0 <= wall["y"] < wall["y"] + wall["h"] <= item["height"]
             for item in MAPS.values()
             for wall in item["obstacles"]
         ))
+
+    def test_large_map_collision_grid_is_internal_and_local(self) -> None:
+        arena = MAPS[DEFAULT_MAP_ID]
+        first = arena["obstacles"][0]
+        candidates = nearby_obstacles(arena, first["x"] + 1, first["y"] + 1, 22)
+        self.assertIn(first, candidates)
+        self.assertLess(len(candidates), len(arena["obstacles"]) // 3)
+        published = public_map(DEFAULT_MAP_ID)
+        self.assertNotIn("_collisionGrid", published)
+        self.assertEqual(published["sectorWidth"], 3600)
+        self.assertEqual(published["sectorHeight"], 2100)
 
     def test_low_walls_can_be_crossed_at_their_top(self) -> None:
         low_wall = next(item for item in OBSTACLES if item["height"] <= 60)

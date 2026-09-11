@@ -1,7 +1,9 @@
-"""Server-authoritative arena layouts.
+"""Server-authoritative large arena layouts.
 
-All maps use the same 3600 x 2100 world so movement, radar and weapon ranges
-stay consistent when the host changes the arena in the lobby.
+Layouts are authored as compact 3600 x 2100 districts and expanded into a
+mirrored 3 x 3 world.  This keeps the hand-designed cover rhythm while making
+every selectable arena 10800 x 6300 without sending players into an empty
+rectangle.
 """
 
 from __future__ import annotations
@@ -9,13 +11,34 @@ from __future__ import annotations
 from typing import Any
 
 
-MAP_WIDTH = 3600
-MAP_HEIGHT = 2100
+BASE_MAP_WIDTH = 3600
+BASE_MAP_HEIGHT = 2100
+MAP_LINEAR_SCALE = 3
+MAP_WIDTH = BASE_MAP_WIDTH * MAP_LINEAR_SCALE
+MAP_HEIGHT = BASE_MAP_HEIGHT * MAP_LINEAR_SCALE
+COLLISION_CELL_SIZE = 420
 DEFAULT_MAP_ID = "citadel"
 
 
-def wall(x: int, y: int, width: int, depth: int, height: int = 110) -> dict[str, int]:
-    return {"x": x, "y": y, "w": width, "h": depth, "height": height}
+def wall(
+    x: int,
+    y: int,
+    width: int,
+    depth: int,
+    height: int = 110,
+    *,
+    kind: str = "wall",
+    material: str = "",
+) -> dict[str, Any]:
+    return {
+        "x": x,
+        "y": y,
+        "w": width,
+        "h": depth,
+        "height": height,
+        "kind": kind,
+        "material": material,
+    }
 
 
 MAPS: dict[str, dict[str, Any]] = {
@@ -158,6 +181,153 @@ MAPS: dict[str, dict[str, Any]] = {
 }
 
 
+REALISTIC_THEMES: dict[str, dict[str, str]] = {
+    "citadel": {
+        "sky": "#6f8798", "horizon": "#b2c2ca", "floor": "#343b3d",
+        "fog": "#788b93", "wall": "#7a7770", "wall2": "#4b5153",
+        "metal": "#344047", "wood": "#6f4c2d", "sun": "#fff0cf",
+        "wallMaterial": "brick",
+    },
+    "brickworks": {
+        "sky": "#76675e", "horizon": "#c89a7a", "floor": "#3a302c",
+        "fog": "#725449", "wall": "#8f4e35", "wall2": "#5d3429",
+        "metal": "#383a38", "wood": "#715038", "sun": "#ffd6a1",
+        "wallMaterial": "brick",
+    },
+    "reactor": {
+        "sky": "#647b80", "horizon": "#a6c2bd", "floor": "#303938",
+        "fog": "#58726e", "wall": "#68716e", "wall2": "#3b4948",
+        "metal": "#314647", "wood": "#65513a", "sun": "#dffff5",
+        "wallMaterial": "metal",
+    },
+    "skyline": {
+        "sky": "#7298b9", "horizon": "#c4d9e5", "floor": "#3b4248",
+        "fog": "#7695a8", "wall": "#737a7e", "wall2": "#424b51",
+        "metal": "#34434e", "wood": "#6e5239", "sun": "#fff5d8",
+        "wallMaterial": "concrete",
+    },
+    "night_market": {
+        "sky": "#171b2a", "horizon": "#49435a", "floor": "#2d2a2b",
+        "fog": "#3f3949", "wall": "#6f6258", "wall2": "#403b3a",
+        "metal": "#34383b", "wood": "#765039", "sun": "#d8ddff",
+        "wallMaterial": "plaster",
+    },
+    "quantum_maze": {
+        "sky": "#566070", "horizon": "#9da8b5", "floor": "#34363b",
+        "fog": "#656d79", "wall": "#777980", "wall2": "#454850",
+        "metal": "#383d46", "wood": "#66503d", "sun": "#e9edff",
+        "wallMaterial": "concrete",
+    },
+}
+
+
+def _classify_obstacle(item: dict[str, Any], default_material: str) -> dict[str, Any]:
+    result = dict(item)
+    longest = max(int(result["w"]), int(result["h"]))
+    shortest = min(int(result["w"]), int(result["h"]))
+    height = int(result.get("height", 110))
+    if height <= 65 and longest <= 260:
+        result["kind"] = "crate"
+        result["material"] = "wood"
+    elif height <= 65:
+        result["kind"] = "barrier"
+        result["material"] = "concrete"
+    elif shortest >= 150:
+        result["kind"] = "building"
+        result["material"] = "concrete"
+    else:
+        result["kind"] = "wall"
+        result["material"] = default_material
+    return result
+
+
+def _expanded_obstacles(items: list[dict[str, Any]], default_material: str) -> list[dict[str, Any]]:
+    expanded: list[dict[str, Any]] = []
+    for row in range(MAP_LINEAR_SCALE):
+        for column in range(MAP_LINEAR_SCALE):
+            mirror_x = (row + column) % 2 == 1
+            mirror_y = row % 2 == 1
+            offset_x = column * BASE_MAP_WIDTH
+            offset_y = row * BASE_MAP_HEIGHT
+            district: list[dict[str, Any]] = []
+            for source in items:
+                item = _classify_obstacle(source, default_material)
+                local_x = BASE_MAP_WIDTH - int(item["x"]) - int(item["w"]) if mirror_x else int(item["x"])
+                local_y = BASE_MAP_HEIGHT - int(item["y"]) - int(item["h"]) if mirror_y else int(item["y"])
+                item["x"] = offset_x + local_x
+                item["y"] = offset_y + local_y
+                item["district"] = row * MAP_LINEAR_SCALE + column
+                district.append(item)
+
+            # Physical cover is added to the wider avenues between districts.
+            # These are server obstacles, so players cannot walk through the
+            # realistic crates and drums drawn by the client.
+            candidates = (
+                wall(offset_x + 150, offset_y + 150, 82, 82, 68, kind="crate", material="wood"),
+                wall(offset_x + 3340, offset_y + 1830, 58, 58, 72, kind="barrel", material="metal"),
+                wall(offset_x + 1770, offset_y + 120, 145, 62, 54, kind="barrier", material="concrete"),
+                wall(offset_x + 170, offset_y + 1830, 180, 64, 58, kind="barrier", material="concrete"),
+            )
+            for candidate in candidates:
+                candidate["district"] = row * MAP_LINEAR_SCALE + column
+                if not any(
+                    candidate["x"] < other["x"] + other["w"] + 24
+                    and candidate["x"] + candidate["w"] + 24 > other["x"]
+                    and candidate["y"] < other["y"] + other["h"] + 24
+                    and candidate["y"] + candidate["h"] + 24 > other["y"]
+                    for other in district
+                ):
+                    district.append(candidate)
+            expanded.extend(district)
+    return expanded
+
+
+def _environment_props(map_id: str) -> list[dict[str, Any]]:
+    props: list[dict[str, Any]] = []
+    for row in range(MAP_LINEAR_SCALE):
+        for column in range(MAP_LINEAR_SCALE):
+            ox, oy = column * BASE_MAP_WIDTH, row * BASE_MAP_HEIGHT
+            district = row * MAP_LINEAR_SCALE + column
+            props.extend(
+                [
+                    {"kind": "lamp", "x": ox + 210, "y": oy + 1030, "height": 145, "district": district},
+                    {"kind": "lamp", "x": ox + 3390, "y": oy + 1070, "height": 145, "district": district},
+                    {"kind": "sign", "x": ox + 1800, "y": oy + 205, "height": 96, "yaw": 0, "district": district},
+                    {"kind": "pipe", "x": ox + 1800, "y": oy + 1900, "length": 150, "yaw": 0, "district": district},
+                ]
+            )
+            if map_id in {"brickworks", "reactor"}:
+                props.append({"kind": "tank", "x": ox + 3100, "y": oy + 1030, "height": 105, "district": district})
+            elif map_id == "night_market":
+                props.append({"kind": "awning", "x": ox + 560, "y": oy + 1060, "width": 180, "district": district})
+    return props
+
+
+def _collision_grid(items: list[dict[str, Any]]) -> dict[tuple[int, int], list[dict[str, Any]]]:
+    grid: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for item in items:
+        first_x = int(item["x"]) // COLLISION_CELL_SIZE
+        last_x = int(item["x"] + item["w"]) // COLLISION_CELL_SIZE
+        first_y = int(item["y"]) // COLLISION_CELL_SIZE
+        last_y = int(item["y"] + item["h"]) // COLLISION_CELL_SIZE
+        for cell_x in range(first_x, last_x + 1):
+            for cell_y in range(first_y, last_y + 1):
+                grid.setdefault((cell_x, cell_y), []).append(item)
+    return grid
+
+
+for _map_id, _arena in MAPS.items():
+    _arena["theme"].update(REALISTIC_THEMES[_map_id])
+    _arena["obstacles"] = _expanded_obstacles(
+        _arena["obstacles"],
+        str(_arena["theme"]["wallMaterial"]),
+    )
+    _arena["props"] = _environment_props(_map_id)
+    _arena["sectorWidth"] = BASE_MAP_WIDTH
+    _arena["sectorHeight"] = BASE_MAP_HEIGHT
+    _arena["_collisionGrid"] = _collision_grid(_arena["obstacles"])
+
+
 def public_map(map_id: str) -> dict[str, Any]:
     selected = MAPS.get(map_id, MAPS[DEFAULT_MAP_ID])
     return {
@@ -168,6 +338,9 @@ def public_map(map_id: str) -> dict[str, Any]:
         "height": selected["height"],
         "theme": dict(selected["theme"]),
         "obstacles": [dict(item) for item in selected["obstacles"]],
+        "props": [dict(item) for item in selected.get("props", [])],
+        "sectorWidth": selected.get("sectorWidth", BASE_MAP_WIDTH),
+        "sectorHeight": selected.get("sectorHeight", BASE_MAP_HEIGHT),
     }
 
 

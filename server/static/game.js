@@ -85,7 +85,7 @@
   const wsOrigin = isAndroidApp
     ? androidServerOrigin.replace(/^https:/, "wss:")
     : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
-  const protocolVersion = "9";
+  const protocolVersion = "10";
   if (isAndroidApp) {
     $("downloadAndroid")?.classList.add("hidden");
     $("downloadAndroidLobby")?.classList.add("hidden");
@@ -106,7 +106,8 @@
     botDifficulties: [],
     state: null,
     stateReceivedAt: performance.now(),
-    arena: { id: "citadel", name: "دژ نئون", width: 3600, height: 2100, obstacles: [], theme: {} },
+    arena: { id: "citadel", name: "دژ نئون", width: 10800, height: 6300, sectorWidth: 3600, sectorHeight: 2100, obstacles: [], props: [], theme: {} },
+    collisionGrid: new Map(),
     move: [0, 0],
     padMove: [0, 0],
     aim: [1, 0],
@@ -415,6 +416,21 @@
   function applyArena(arena) {
     if (!arena?.width || !arena?.height || !Array.isArray(arena.obstacles)) return;
     app.arena = arena;
+    app.collisionGrid = new Map();
+    const cellSize = 420;
+    for (const obstacle of arena.obstacles) {
+      const firstX = Math.floor(obstacle.x / cellSize);
+      const lastX = Math.floor((obstacle.x + obstacle.w) / cellSize);
+      const firstY = Math.floor(obstacle.y / cellSize);
+      const lastY = Math.floor((obstacle.y + obstacle.h) / cellSize);
+      for (let cellX = firstX; cellX <= lastX; cellX += 1) {
+        for (let cellY = firstY; cellY <= lastY; cellY += 1) {
+          const key = `${cellX}:${cellY}`;
+          if (!app.collisionGrid.has(key)) app.collisionGrid.set(key, []);
+          app.collisionGrid.get(key).push(obstacle);
+        }
+      }
+    }
     app.renderPlayers.clear();
     mapBadge.textContent = `نقشه: ${arena.name || "نئون"}`;
     if (mapSelect) mapSelect.value = arena.id || "citadel";
@@ -1588,28 +1604,36 @@
     mapCtx.clearRect(0, 0, width, height);
     mapCtx.fillStyle = "rgba(2,8,18,.96)";
     mapCtx.fillRect(0, 0, width, height);
-    mapCtx.strokeStyle = "rgba(88,205,238,.11)";
+    const sectorWidth = Number(app.arena.sectorWidth) || app.arena.width / 3;
+    const sectorHeight = Number(app.arena.sectorHeight) || app.arena.height / 3;
+    const me = app.state.players.find((player) => player.id === app.playerId);
+    if (me) {
+      const sectorX = Math.floor(me.x / sectorWidth), sectorY = Math.floor(me.y / sectorHeight);
+      mapCtx.fillStyle = "rgba(32,217,255,.075)";
+      mapCtx.fillRect(pad + sectorX * sectorWidth * sx, pad + sectorY * sectorHeight * sy, sectorWidth * sx, sectorHeight * sy);
+    }
+    mapCtx.strokeStyle = "rgba(88,205,238,.18)";
     mapCtx.lineWidth = Math.max(1, dpr * .6);
-    for (let column = 1; column < 6; column++) {
-      const x = pad + (width - pad * 2) * column / 6;
+    for (let xWorld = sectorWidth; xWorld < app.arena.width; xWorld += sectorWidth) {
+      const x = pad + xWorld * sx;
       mapCtx.beginPath(); mapCtx.moveTo(x, pad); mapCtx.lineTo(x, height - pad); mapCtx.stroke();
     }
-    for (let row = 1; row < 4; row++) {
-      const y = pad + (height - pad * 2) * row / 4;
+    for (let yWorld = sectorHeight; yWorld < app.arena.height; yWorld += sectorHeight) {
+      const y = pad + yWorld * sy;
       mapCtx.beginPath(); mapCtx.moveTo(pad, y); mapCtx.lineTo(width - pad, y); mapCtx.stroke();
     }
     mapCtx.strokeStyle = `${accent}88`;
     mapCtx.lineWidth = dpr;
     for (const rect of app.arena.obstacles) {
-      mapCtx.fillStyle = Number(rect.height) <= 65 ? "#28536a" : "#142d45";
+      mapCtx.fillStyle = rect.kind === "crate" || rect.kind === "barrel" ? "#735438" : Number(rect.height) <= 65 ? "#3f5964" : "#263943";
       mapCtx.fillRect(pad + rect.x * sx, pad + rect.y * sy, Math.max(1, rect.w * sx), Math.max(1, rect.h * sy));
       mapCtx.strokeRect(pad + rect.x * sx, pad + rect.y * sy, Math.max(1, rect.w * sx), Math.max(1, rect.h * sy));
     }
     for (const player of app.state.players) {
       if (!player.alive || (player.radarHidden && player.id !== app.playerId)) continue;
       const x = pad + player.x * sx, y = pad + player.y * sy;
-      mapCtx.fillStyle = player.id === app.playerId ? "#fff" : player.color; mapCtx.shadowColor = player.color; mapCtx.shadowBlur = 5 * dpr; mapCtx.beginPath(); mapCtx.arc(x, y, (player.id === app.playerId ? 4.5 : 3.4) * dpr, 0, Math.PI * 2); mapCtx.fill();
-      if (player.id === app.playerId) { const angle = app.cameraAngle; mapCtx.strokeStyle = player.color; mapCtx.beginPath(); mapCtx.moveTo(x, y); mapCtx.lineTo(x + Math.cos(angle) * 13 * dpr, y + Math.sin(angle) * 13 * dpr); mapCtx.stroke(); }
+      mapCtx.fillStyle = player.id === app.playerId ? "#fff" : player.color; mapCtx.shadowColor = player.color; mapCtx.shadowBlur = 6 * dpr; mapCtx.beginPath(); mapCtx.arc(x, y, (player.id === app.playerId ? 5.2 : 4.1) * dpr, 0, Math.PI * 2); mapCtx.fill();
+      if (player.id === app.playerId) { const angle = app.cameraAngle; mapCtx.strokeStyle = player.color; mapCtx.lineWidth = 1.4 * dpr; mapCtx.beginPath(); mapCtx.moveTo(x, y); mapCtx.lineTo(x + Math.cos(angle) * 15 * dpr, y + Math.sin(angle) * 15 * dpr); mapCtx.stroke(); }
     }
     mapCtx.shadowBlur = 0; mapCtx.strokeStyle = accent; mapCtx.lineWidth = dpr; mapCtx.strokeRect(.5 * dpr, .5 * dpr, width - dpr, height - dpr);
   }
@@ -1687,7 +1711,16 @@
   }
 
   function isClearLocal(x, y, z = 0) {
-    return !app.arena.obstacles.some((rect) => {
+    const cellSize = 420;
+    const cellX = Math.floor(x / cellSize), cellY = Math.floor(y / cellSize);
+    const nearby = [];
+    for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+      for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+        nearby.push(...(app.collisionGrid.get(`${cellX + offsetX}:${cellY + offsetY}`) || []));
+      }
+    }
+    const candidates = nearby.length ? nearby : app.arena.obstacles;
+    return !candidates.some((rect) => {
       if ((Number(rect.height) || 100) <= z + 7) return false;
       const nearestX = Math.max(rect.x, Math.min(x, rect.x + rect.w));
       const nearestY = Math.max(rect.y, Math.min(y, rect.y + rect.h));

@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
-from .maps import DEFAULT_MAP_ID, MAPS, map_options, public_map
+from .maps import COLLISION_CELL_SIZE, DEFAULT_MAP_ID, MAPS, map_options, public_map
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -125,6 +125,36 @@ def circle_hits_rect(x: float, y: float, radius: float, rect: dict[str, int]) ->
     return (x - nearest_x) ** 2 + (y - nearest_y) ** 2 < radius**2
 
 
+def nearby_obstacles(
+    arena: dict[str, Any],
+    x: float,
+    y: float,
+    radius: float = 0.0,
+) -> list[dict[str, Any]]:
+    """Return collision candidates from the precomputed map grid.
+
+    Expanded arenas contain hundreds of detailed pieces.  Keeping this lookup
+    local makes player movement cost roughly constant on small servers.
+    """
+    grid = arena.get("_collisionGrid")
+    if not isinstance(grid, dict):
+        return arena["obstacles"]
+    first_x = int(max(0.0, x - radius)) // COLLISION_CELL_SIZE
+    last_x = int(max(0.0, x + radius)) // COLLISION_CELL_SIZE
+    first_y = int(max(0.0, y - radius)) // COLLISION_CELL_SIZE
+    last_y = int(max(0.0, y + radius)) // COLLISION_CELL_SIZE
+    result: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for cell_x in range(first_x, last_x + 1):
+        for cell_y in range(first_y, last_y + 1):
+            for item in grid.get((cell_x, cell_y), ()):
+                identity = id(item)
+                if identity not in seen:
+                    seen.add(identity)
+                    result.append(item)
+    return result
+
+
 def ray_rect_distance(
     origin_x: float,
     origin_y: float,
@@ -166,7 +196,7 @@ def clear_position(
     return not any(
         float(obstacle.get("height", 100)) > z + STEP_CLEARANCE
         and circle_hits_rect(x, y, radius, obstacle)
-        for obstacle in selected["obstacles"]
+        for obstacle in nearby_obstacles(selected, x, y, radius)
     )
 
 
@@ -175,7 +205,7 @@ def surface_height(x: float, y: float, arena: dict[str, Any] | None = None) -> f
     return max(
         (
             float(obstacle.get("height", 100))
-            for obstacle in selected["obstacles"]
+            for obstacle in nearby_obstacles(selected, x, y)
             if obstacle["x"] <= x <= obstacle["x"] + obstacle["w"]
             and obstacle["y"] <= y <= obstacle["y"] + obstacle["h"]
         ),
@@ -183,17 +213,50 @@ def surface_height(x: float, y: float, arena: dict[str, Any] | None = None) -> f
     )
 
 
+def nearest_clear_point(
+    arena: dict[str, Any],
+    preferred_x: float,
+    preferred_y: float,
+    radius: float = PLAYER_RADIUS,
+) -> tuple[float, float]:
+    """Find a deterministic safe fallback near a preferred spawn location."""
+    width, height = float(arena["width"]), float(arena["height"])
+    for ring in range(14):
+        distance = ring * 90.0
+        samples = max(1, ring * 8)
+        for index in range(samples):
+            angle = math.tau * index / samples
+            x = clamp(preferred_x + math.cos(angle) * distance, radius + 2, width - radius - 2)
+            y = clamp(preferred_y + math.sin(angle) * distance, radius + 2, height - radius - 2)
+            if clear_position(x, y, radius, arena):
+                return x, y
+    # Every authored map leaves its district corners open; retain one final
+    # bounded fallback for malformed custom maps.
+    return radius + 3, radius + 3
+
+
 def spawn_point(players: list["Player"], arena: dict[str, Any] | None = None) -> tuple[float, float]:
     selected = arena or MAPS[DEFAULT_MAP_ID]
     width, height = float(selected["width"]), float(selected["height"])
-    for _ in range(80):
-        x = random.uniform(65, width - 65)
-        y = random.uniform(65, height - 65)
+    living = [player for player in players if player.alive]
+    for _ in range(140):
+        if living:
+            anchor = random.choice(living)
+            distance = random.uniform(420, 1250)
+            angle = random.uniform(0, math.tau)
+            x = clamp(anchor.x + math.cos(angle) * distance, 65, width - 65)
+            y = clamp(anchor.y + math.sin(angle) * distance, 65, height - 65)
+        else:
+            sector_width = float(selected.get("sectorWidth", width))
+            sector_height = float(selected.get("sectorHeight", height))
+            center_x, center_y = width / 2, height / 2
+            x = random.uniform(center_x - sector_width * 0.42, center_x + sector_width * 0.42)
+            y = random.uniform(center_y - sector_height * 0.42, center_y + sector_height * 0.42)
         if clear_position(x, y, arena=selected) and all(
-            math.hypot(x - player.x, y - player.y) > 120 for player in players if player.alive
+            math.hypot(x - player.x, y - player.y) > 240 for player in living
         ):
             return x, y
-    return 80.0, 80.0
+    return nearest_clear_point(selected, width / 2, height / 2)
 
 
 def item_spawn_point(
@@ -203,9 +266,17 @@ def item_spawn_point(
 ) -> tuple[float, float]:
     selected = arena or MAPS[DEFAULT_MAP_ID]
     width, height = float(selected["width"]), float(selected["height"])
-    for _ in range(80):
-        x = random.uniform(55, width - 55)
-        y = random.uniform(55, height - 55)
+    living = [player for player in players if player.alive]
+    for _ in range(120):
+        if living:
+            anchor = random.choice(living)
+            distance = random.uniform(180, 720)
+            angle = random.uniform(0, math.tau)
+            x = clamp(anchor.x + math.cos(angle) * distance, 55, width - 55)
+            y = clamp(anchor.y + math.sin(angle) * distance, 55, height - 55)
+        else:
+            x = random.uniform(width * 0.35, width * 0.65)
+            y = random.uniform(height * 0.35, height * 0.65)
         if not clear_position(x, y, 24, selected):
             continue
         if any(math.hypot(x - item.x, y - item.y) < 90 for item in items):
@@ -213,7 +284,7 @@ def item_spawn_point(
         if any(math.hypot(x - player.x, y - player.y) < 70 for player in players if player.alive):
             continue
         return x, y
-    return width / 2, height / 2
+    return nearest_clear_point(selected, width / 2, height / 2, 24)
 
 
 @dataclass(slots=True)
@@ -279,6 +350,7 @@ class Player:
             "alive": self.alive,
             "aim": [round(self.aim_x, 2), round(self.aim_y, 2)],
             "pitch": round(self.aim_pitch, 3),
+            "moving": math.hypot(self.move_x, self.move_y) > 0.08,
             "shield": self.shield_until > now,
             "speedBoost": self.speed_until > now,
             "dashing": self.dash_until > now,
@@ -923,7 +995,9 @@ class Room:
             wall_distance = min([wall_distance, *(value for value in boundary_distances if value >= 0)])
             if vertical_slope < -1e-9:
                 wall_distance = min(wall_distance, max(0.0, -shot_height / vertical_slope))
-            for obstacle in self.arena["obstacles"]:
+            shot_mid_x = start_x + dx * wall_distance * 0.5
+            shot_mid_y = start_y + dy * wall_distance * 0.5
+            for obstacle in nearby_obstacles(self.arena, shot_mid_x, shot_mid_y, wall_distance * 0.5 + PLAYER_RADIUS):
                 hit_distance = ray_rect_distance(start_x, start_y, dx, dy, obstacle, wall_distance)
                 if hit_distance is None:
                     continue
@@ -1052,7 +1126,7 @@ class Room:
                 if projectile.y < PROJECTILE_RADIUS or projectile.y > height - PROJECTILE_RADIUS:
                     projectile.y = clamp(projectile.y, PROJECTILE_RADIUS, height - PROJECTILE_RADIUS)
                     projectile.vy *= -0.55
-                for obstacle in self.arena["obstacles"]:
+                for obstacle in nearby_obstacles(self.arena, projectile.x, projectile.y, PROJECTILE_RADIUS + 4):
                     if projectile.z > float(obstacle.get("height", 100)):
                         continue
                     if not circle_hits_rect(projectile.x, projectile.y, PROJECTILE_RADIUS, obstacle):
@@ -1082,7 +1156,7 @@ class Room:
                 if any(
                     projectile.z <= float(obstacle.get("height", 100))
                     and circle_hits_rect(projectile.x, projectile.y, PROJECTILE_RADIUS, obstacle)
-                    for obstacle in self.arena["obstacles"]
+                    for obstacle in nearby_obstacles(self.arena, projectile.x, projectile.y, PROJECTILE_RADIUS + 4)
                 ):
                     should_explode = True
                 owner = self.players.get(projectile.owner_id)
