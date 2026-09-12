@@ -270,9 +270,9 @@ if [[ "${BUILD_ANDROID}" -eq 1 ]]; then
   unzip -p "${APK_SOURCE}" assets/game.js > "${BUILD_TMP}/embedded-game.js"
   grep -Fq "${PUBLIC_ORIGIN}" "${BUILD_TMP}/embedded-game.js" || \
     fail "The APK does not contain the selected server origin."
-  unzip -l "${APK_SOURCE}" | grep -Fq "assets/assets/models/soldier.gltf" || \
+  unzip -l "${APK_SOURCE}" | grep -F "assets/assets/models/soldier.gltf" >/dev/null || \
     fail "The APK does not contain the animated soldier model."
-  unzip -l "${APK_SOURCE}" | grep -Fq "assets/assets/textures/brick_color.webp" || \
+  unzip -l "${APK_SOURCE}" | grep -F "assets/assets/textures/brick_color.webp" >/dev/null || \
     fail "The APK does not contain the local PBR textures."
 fi
 
