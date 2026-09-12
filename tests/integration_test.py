@@ -141,12 +141,26 @@ async def main() -> None:
         assert me_after["move"] == [1.0, 0.0]
         assert me_after["shooting"] is True
         assert moved["bullets"]
+        assert me_after["ammo"]["base"] < me_before["ammo"]["base"]
+        assert "footprints" in moved and moved["radarRange"] == 650
+        await first.send(json.dumps({"type":"input","seq":2,"move":[0,0],"aim":[1,0],"shooting":False}))
+        async with asyncio.timeout(3):
+            while not me_after["grounded"]:
+                state = await receive_type(first,"state")
+                me_after = next(p for p in state["players"] if p["id"] == welcome_one["playerId"])
+        await first.send(json.dumps({"type":"action","action":"prone"}))
+        async with asyncio.timeout(3):
+            while me_after["stance"] != "prone":
+                state = await receive_type(first,"state")
+                me_after = next(p for p in state["players"] if p["id"] == welcome_one["playerId"])
+        assert me_after["radarHidden"] and me_after["height"] == 22
+
 
         powerup_state = moved
         async with asyncio.timeout(6.0):
             while not powerup_state["powerups"]:
                 powerup_state = await receive_type(first, "state")
-        assert powerup_state["powerups"][0]["kind"] in {"speed", "health", "shield", "weapon", "stealth", "grenade", "rpg"}
+        assert powerup_state["powerups"][0]["kind"] in {"speed", "health", "shield", "weapon", "stealth", "grenade", "rpg", "ammo", "sniper", "heavy", "rapid", "spread"}
         assert "projectiles" in powerup_state and "explosions" in powerup_state
         await first.send(json.dumps({"type":"reset"}))
         reset_state = await receive_type(first, "state")
