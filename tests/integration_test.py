@@ -99,7 +99,7 @@ async def main() -> None:
         assert arena_update["arena"]["width"] == 10800
         assert arena_update["arena"]["height"] == 6300
         assert arena_update["arena"]["props"]
-        assert arena_update["arena"]["sectorWidth"] == 3600
+        assert arena_update["arena"]["sectorWidth"] == 10800
         await first.send(json.dumps({"type": "set_bot_difficulty", "difficulty": "hard"}))
         await first.send(json.dumps({"type": "add_bot"}))
         bot_state = None
