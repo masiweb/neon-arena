@@ -53,8 +53,8 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
           unzip -p app/build/outputs/apk/debug/app-debug.apk assets/game.js > /tmp/neon-game.js
           grep -Fq "https://game.chanelchat.ir" /tmp/neon-game.js
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -Fq "assets/assets/models/soldier.gltf"
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -Fq "assets/assets/textures/brick_color.webp"
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -F "assets/assets/models/soldier.gltf" >/dev/null
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -F "assets/assets/textures/brick_color.webp" >/dev/null
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
