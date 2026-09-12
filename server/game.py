@@ -1310,7 +1310,7 @@ class Room:
                         continue
                     if owner and owner.team_id is not None and owner.team_id == target.team_id:
                         continue
-                    if math.hypot(projectile.x - target.x, projectile.y - target.y) <= PLAYER_RADIUS + PROJECTILE_RADIUS:
+                    if math.hypot(projectile.x - target.x, projectile.y - target.y) <= PLAYER_RADIUS + PROJECTILE_RADIUS and target.z-PROJECTILE_RADIUS <= projectile.z <= target.z+STANCE_HEIGHT[target.stance]+PROJECTILE_RADIUS:
                         should_explode = True
                         break
 

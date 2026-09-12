@@ -1457,6 +1457,9 @@ class NeonRendererNext {
     const movement = Math.min(1, Math.hypot(frame.move?.[0] || 0, frame.move?.[1] || 0));
     const eyeBob = Math.sin(this.bobTime * 2) * 0.72 * movement;
     const zoom = frame.me.weapon === "sniper" ? Number(frame.me.zoom || 1) : 1;
+    this.camera.far = zoom > 1 ? 5600 : this.quality.distance + 1400;
+    this.scene.fog.near = zoom > 1 ? 2200 : this.quality.distance*.5;
+    this.scene.fog.far = zoom > 1 ? 5200 : this.quality.distance;
     this.camera.fov = THREE.MathUtils.radToDeg(2*Math.atan(Math.tan(THREE.MathUtils.degToRad(70)/2)/zoom));
     this.camera.updateProjectionMatrix();
     const eyeY = Number(frame.me.z || 0) + Number(frame.me.height || 72)*.875 + eyeBob;
