@@ -85,7 +85,7 @@
   const wsOrigin = isAndroidApp
     ? androidServerOrigin.replace(/^https:/, "wss:")
     : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
-  const protocolVersion = "10";
+  const protocolVersion = "11";
   if (isAndroidApp) {
     $("downloadAndroid")?.classList.add("hidden");
     $("downloadAndroidLobby")?.classList.add("hidden");
@@ -653,11 +653,11 @@
 
   function rotateCamera(dx, dy, pointerType) {
     const mouse = pointerType === "mouse";
-    const yawSensitivity = mouse ? .00215 : .00405;
-    const pitchSensitivity = mouse ? .0017 : .00275;
-    const maxDelta = mouse ? 90 : 52;
-    app.cameraAngle += Math.max(-maxDelta, Math.min(maxDelta, dx)) * (mouse ? yawSensitivity : .00325);
-    app.cameraPitch = Math.max(-.48, Math.min(.42, app.cameraPitch - Math.max(-48, Math.min(48, dy)) * pitchSensitivity));
+    const yawSensitivity = mouse ? .00205 : .0038;
+    const pitchSensitivity = mouse ? .00165 : .0027;
+    const maxDelta = mouse ? 110 : 68;
+    app.cameraAngle += Math.max(-maxDelta, Math.min(maxDelta, dx)) * yawSensitivity;
+    app.cameraPitch = Math.max(-.48, Math.min(.42, app.cameraPitch - Math.max(-58, Math.min(58, dy)) * pitchSensitivity));
     if (Math.abs(dy) > 1.5) app.lastPitchInputAt = performance.now();
   }
 
@@ -678,11 +678,14 @@
   lookSurface.addEventListener("pointermove", (event) => {
     if (event.pointerType === "mouse" || event.pointerId !== lookPointer) return;
     event.preventDefault();
-    const dx = event.clientX - lookX;
-    const dy = event.clientY - lookY;
-    lookX = event.clientX;
-    lookY = event.clientY;
-    rotateCamera(dx, dy, event.pointerType);
+    const samples = event.getCoalescedEvents?.() || [event];
+    for (const sample of samples) {
+      const dx = sample.clientX - lookX;
+      const dy = sample.clientY - lookY;
+      lookX = sample.clientX;
+      lookY = sample.clientY;
+      rotateCamera(dx, dy, event.pointerType);
+    }
   });
   const endLook = (event) => {
     if (event.pointerId !== lookPointer) return;
@@ -1680,33 +1683,47 @@
   function smoothPlayer(player, dt) {
     let rendered = app.renderPlayers.get(player.id);
     if (!rendered || Math.hypot(rendered.x - player.x, rendered.y - player.y) > 120) {
-      rendered = { x: player.x, y: player.y, z: player.z || 0 };
+      rendered = { x: player.x, y: player.y, z: player.z || 0, vx: 0, vy: 0 };
       app.renderPlayers.set(player.id, rendered);
     }
 
+    const snapshotAge = Math.min(.12, Math.max(0, (performance.now() - app.stateReceivedAt) / 1000));
     if (player.id === app.playerId && player.alive && app.state.phase === "playing") {
       let speed = 285 * (player.speedBoost ? 1.55 : 1) * (player.dashing ? 2.55 : 1);
-      const nextX = Math.max(21, Math.min(app.arena.width - 21, rendered.x + app.move[0] * speed * dt));
+      const desiredX = app.move[0] * speed;
+      const desiredY = app.move[1] * speed;
+      const acceleration = Math.hypot(desiredX, desiredY) > .1 ? 1 - Math.exp(-25 * dt) : 1 - Math.exp(-34 * dt);
+      rendered.vx += (desiredX - rendered.vx) * acceleration;
+      rendered.vy += (desiredY - rendered.vy) * acceleration;
+      const nextX = Math.max(21, Math.min(app.arena.width - 21, rendered.x + rendered.vx * dt));
       if (isClearLocal(nextX, rendered.y, rendered.z)) rendered.x = nextX;
-      const nextY = Math.max(21, Math.min(app.arena.height - 21, rendered.y + app.move[1] * speed * dt));
+      else rendered.vx = 0;
+      const nextY = Math.max(21, Math.min(app.arena.height - 21, rendered.y + rendered.vy * dt));
       if (isClearLocal(rendered.x, nextY, rendered.z)) rendered.y = nextY;
-      const error = Math.hypot(player.x - rendered.x, player.y - rendered.y);
-      if (error > 160) {
-        rendered.x = player.x;
-        rendered.y = player.y;
-      } else if (error > 4) {
+      else rendered.vy = 0;
+      const targetX = player.x + desiredX * snapshotAge;
+      const targetY = player.y + desiredY * snapshotAge;
+      const error = Math.hypot(targetX - rendered.x, targetY - rendered.y);
+      if (error > 210) {
+        rendered.x = targetX;
+        rendered.y = targetY;
+      } else if (error > 2.5) {
         const moving = Math.hypot(app.move[0], app.move[1]) > .05;
-        const correction = 1 - Math.exp(-(moving ? 4.2 : 14) * dt);
-        rendered.x += (player.x - rendered.x) * correction;
-        rendered.y += (player.y - rendered.y) * correction;
+        const correction = 1 - Math.exp(-(moving ? (error > 70 ? 10 : 4.8) : 18) * dt);
+        rendered.x += (targetX - rendered.x) * correction;
+        rendered.y += (targetY - rendered.y) * correction;
       }
     } else {
-      const interpolation = 1 - Math.exp(-23 * dt);
-      rendered.x += (player.x - rendered.x) * interpolation;
-      rendered.y += (player.y - rendered.y) * interpolation;
+      let speed = 285 * (player.speedBoost ? 1.55 : 1) * (player.dashing ? 2.55 : 1);
+      const targetX = player.x + Number(player.move?.[0] || 0) * speed * snapshotAge;
+      const targetY = player.y + Number(player.move?.[1] || 0) * speed * snapshotAge;
+      const interpolation = 1 - Math.exp(-15 * dt);
+      rendered.x += (targetX - rendered.x) * interpolation;
+      rendered.y += (targetY - rendered.y) * interpolation;
     }
-    const verticalInterpolation = 1 - Math.exp(-24 * dt);
-    rendered.z += ((player.z || 0) - rendered.z) * verticalInterpolation;
+    const verticalTarget = (player.z || 0) + Number(player.vz || 0) * snapshotAge;
+    const verticalInterpolation = 1 - Math.exp(-18 * dt);
+    rendered.z += (verticalTarget - rendered.z) * verticalInterpolation;
     return { ...player, x: rendered.x, y: rendered.y, z: rendered.z };
   }
 

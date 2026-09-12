@@ -23,8 +23,8 @@ from .game import GameHub
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 ROOM_RE = re.compile(r"^[A-HJ-NP-Z2-9]{4}$")
-GAME_VERSION = "4.0.0"
-PROTOCOL_VERSION = "10"
+GAME_VERSION = "5.0.0"
+PROTOCOL_VERSION = "11"
 PUBLIC_ORIGIN = os.environ.get("NEON_PUBLIC_ORIGIN", "https://game.chanelchat.ir").rstrip("/")
 
 database = Database()

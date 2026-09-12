@@ -81,6 +81,9 @@ bash -n "${ROOT_DIR}/verify.sh"
 node --check "${ROOT_DIR}/server/static/game.js"
 node --check "${ROOT_DIR}/server/static/renderer3d.js"
 node --check "${ROOT_DIR}/server/static/admin.js"
+test -s "${ROOT_DIR}/server/static/assets/models/soldier.gltf"
+test -s "${ROOT_DIR}/server/static/assets/textures/brick_color.webp"
+test -s "${ROOT_DIR}/server/static/assets/licenses/THREE-LICENSE.txt"
 
 echo "[2/3] Running Python unit tests..."
 (

@@ -82,8 +82,7 @@ __pycache__/
 /drizzle.config.ts
 /eslint.config.mjs
 /next.config.ts
-/package-lock.json
-/package.json
+# The renderer build is intentionally reproducible; keep package manifests.
 /postcss.config.mjs
 /tsconfig.json
 /vite.config.ts

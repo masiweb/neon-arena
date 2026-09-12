@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Neon Arena renderer harness</title>
+    <style>
+      html,body,canvas{width:100%;height:100%;margin:0;display:block;overflow:hidden;background:#111}
+      #status{position:fixed;left:12px;top:12px;padding:8px 12px;color:#fff;background:#0009;font:13px system-ui;z-index:2}
+    </style>
+  </head>
+  <body>
+    <div id="status">loading local assets…</div>
+    <canvas id="arena"></canvas>
+    <script>window.__NEON_ASSET_ROOT__="../server/static/assets/";</script>
+    <script src="../server/static/renderer3d.js"></script>
+    <script>
+      const renderer=window.NeonRenderer3D.create(document.getElementById("arena"));
+      const theme={sky:"#739fca",horizon:"#d4e2e5",floor:"#4e5149",fog:"#83989e",wall:"#8b8278",wall2:"#4c5355",metal:"#39474e",wood:"#755038",sun:"#fff1ce",accent:"#24ddf0",accent2:"#ff3eab",wallMaterial:"brick"};
+      const obstacles=[
+        {x:420,y:160,w:620,h:85,height:150,kind:"wall",material:"brick"},
+        {x:420,y:245,w:85,h:570,height:150,kind:"wall",material:"brick"},
+        {x:1120,y:120,w:360,h:300,height:220,kind:"building",material:"concrete"},
+        {x:1740,y:460,w:520,h:90,height:115,kind:"wall",material:"brick"},
+        {x:940,y:770,w:180,h:95,height:55,kind:"barrier",material:"concrete"},
+        {x:1510,y:780,w:90,h:90,height:68,kind:"crate",material:"wood"},
+        {x:1900,y:850,w:62,h:62,height:72,kind:"barrel",material:"metal"},
+        {x:2450,y:260,w:620,h:90,height:150,kind:"wall",material:"brick"},
+        {x:2980,y:350,w:90,h:620,height:150,kind:"wall",material:"brick"}
+      ];
+      const arena={id:"harness",name:"Reference range",width:3600,height:2100,sectorWidth:1800,sectorHeight:1050,theme,obstacles,props:[
+        {kind:"lamp",x:760,y:1030,height:160,district:0},
+        {kind:"sign",x:1800,y:230,height:105,district:0},
+        {kind:"tank",x:2850,y:1020,height:115,district:0}
+      ]};
+      const me={id:"me",name:"Camera",x:980,y:1370,z:0,alive:true,health:100,weapon:"base",aim:[1,0],grounded:true};
+      const players=[
+        me,
+        {id:"enemy",name:"Neon Ranger",x:1700,y:1290,z:0,alive:true,health:100,weapon:"rapid",aim:[-1,.05],moving:true,shooting:true,grounded:true,color:"#ff426f"},
+        {id:"friend",name:"Alpha Team",x:1420,y:970,z:55,alive:true,health:70,weapon:"spread",aim:[.6,.8],moving:false,shooting:false,grounded:true,color:"#28dfff",teamId:"a"}
+      ];
+      me.teamId="a";
+      const started=performance.now();
+      function frame(now){
+        const t=(now-started)/1000;
+        const angle=-.11+Math.sin(t*.16)*.025;
+        renderer.render({arena,me,players,powerups:[
+          {id:"heal",kind:"health",x:1250,y:1350},
+          {id:"rocket",kind:"rpg",x:2080,y:1170}
+        ],projectiles:[],explosions:[],traces:t%2<.16?[{x1:1680,y1:1288,x2:1120,y2:1345,z:48,z2:50,color:"#ffd38a"}]:[],angle,pitch:-.025,now,dt:1/60,shooting:t%1<.12,move:[0,0],muzzle:t%1<.06,recoil:t%1<.12?3:0});
+        document.getElementById("status").textContent="renderer: "+document.getElementById("arena").dataset.renderer+" · quality: "+document.getElementById("arena").dataset.quality+" · local assets";
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    </script>
+  </body>
+</html>

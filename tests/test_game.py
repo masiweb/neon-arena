@@ -181,7 +181,10 @@ class GameRulesTests(unittest.TestCase):
             "shooting": True,
         }))
         self.assertEqual(player.last_input_seq, 42)
-        self.assertEqual(player.public(time.monotonic())["ack"], 42)
+        snapshot = player.public(time.monotonic())
+        self.assertEqual(snapshot["ack"], 42)
+        self.assertEqual(snapshot["move"], [0.5, 0.0])
+        self.assertTrue(snapshot["shooting"])
         self.assertEqual(player.move_x, 0.5)
         self.assertEqual(player.aim_pitch, 0.2)
         self.assertTrue(player.shooting)

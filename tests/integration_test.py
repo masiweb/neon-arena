@@ -138,6 +138,8 @@ async def main() -> None:
                 me_after = next(player for player in moved["players"] if player["id"] == welcome_one["playerId"])
         assert me_after["x"] >= me_before["x"]
         assert me_after["ack"] == 1
+        assert me_after["move"] == [1.0, 0.0]
+        assert me_after["shooting"] is True
         assert moved["bullets"]
 
         powerup_state = moved
