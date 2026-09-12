@@ -50,7 +50,7 @@ jobs:
       - name: Verify signature and embedded server
         working-directory: android
         run: |
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.1.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
           unzip -p app/build/outputs/apk/debug/app-debug.apk assets/game.js > /tmp/neon-game.js
           grep -Fq "https://game.chanelchat.ir" /tmp/neon-game.js
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -F "assets/assets/models/soldier.gltf" >/dev/null
@@ -59,6 +59,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: neon-arena-android-v5.0.0
+          name: neon-arena-android-v5.1.0
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+

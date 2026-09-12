@@ -565,7 +565,7 @@
       const rightX=-forwardZ, rightZ=forwardX;
       return [
         player.x+forwardX*front+rightX*side,
-        (Number(player.z)||0)+height,
+        (Number(player.z)||0)+height*(Number(player.height)||72)/72,
         player.y+forwardZ*front+rightZ*side
       ];
     }
@@ -788,13 +788,13 @@
 
       const movement=Math.min(1,Math.hypot(scene.move[0],scene.move[1]));
       const bob=Math.sin(scene.now*0.0105)*0.7*movement;
-      const eye=[scene.me.x,63+(Number(scene.me.z)||0)+bob,scene.me.y];
+      const eye=[scene.me.x,(Number(scene.me.height)||72)*.875+(Number(scene.me.z)||0)+bob,scene.me.y];
       const cp=Math.cos(scene.pitch), sp=Math.sin(scene.pitch);
       const ca=Math.cos(scene.angle), sa=Math.sin(scene.angle);
       const forward=[ca*cp,sp,sa*cp];
       const target=[eye[0]+forward[0]*140,eye[1]+forward[1]*140,eye[2]+forward[2]*140];
       const viewProjection=multiply(
-        perspective(PI*0.39,width/height,1.6,mobile?3900:4700),
+        perspective(2*Math.atan(Math.tan(PI*.39/2)/(scene.me.weapon === "sniper" ? scene.me.zoom || 1 : 1)),width/height,1.6,4700),
         lookAt(eye,target,[0,1,0])
       );
       gl.useProgram(program);
@@ -850,3 +850,4 @@
 
   window.NeonRenderer3D={create:create};
 })();
+

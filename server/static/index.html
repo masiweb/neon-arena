@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>نبرد نئون</title>
-    <link rel="stylesheet" href="/static/styles.css?v=5.0.0" />
+    <link rel="stylesheet" href="/static/styles.css?v=5.1.0" />
   </head>
   <body>
     <div id="rotateNotice" class="rotate-notice" aria-live="polite">
@@ -96,12 +96,17 @@
         <div id="voiceMenu" class="hud-popover voice-menu hidden"><button type="button" data-voice-mode="off">🔇 قطع</button><button type="button" data-voice-mode="room">🎙 همه</button><button id="voiceTeamOption" type="button" data-voice-mode="team">◈ تیم</button></div>
         <div class="game-status"><span id="mapBadge">دژ نئون</span><span id="weaponBadge" class="weapon-badge">معمولی</span></div>
         <div id="headshotBanner" class="headshot-banner" aria-live="assertive">HEADSHOT</div>
-        <div id="centerMessage" class="center-message"><strong>منتظر بازیکن‌ها</strong><span>سازنده اتاق بازی را شروع می‌کند</span><div id="resultAd" class="ad-slot hidden"></div><div id="lobbySettings" class="lobby-settings hidden"><label>نقشه<select id="mapSelect"></select></label><label>قدرت و دقت بات<select id="botDifficulty"></select></label></div><div class="center-actions"><button id="startRound" class="button primary hidden" type="button">شروع بازی</button></div><div id="botControls" class="bot-controls hidden"><button id="removeBot" type="button">− حذف بات</button><span id="botCount">۰ بات</span><button id="addBot" type="button">＋ افزودن بات</button></div><div id="weaponChooser" class="weapon-chooser hidden"><button type="button" data-weapon="heavy"><b>توپ سنگین</b><small>قدرت تخریب بالا</small></button><button type="button" data-weapon="rapid"><b>رگبار سریع</b><small>سرعت شلیک بالا</small></button><button type="button" data-weapon="spread"><b>سه‌تیر</b><small>پوشش بیشتر</small></button></div></div>
+        <div id="centerMessage" class="center-message"><strong>منتظر بازیکن‌ها</strong><span>سازنده اتاق بازی را شروع می‌کند</span><div id="resultAd" class="ad-slot hidden"></div><div id="lobbySettings" class="lobby-settings hidden"><label>نقشه<select id="mapSelect"></select></label><label>قدرت و دقت بات<select id="botDifficulty"></select></label></div><div class="center-actions"><button id="startRound" class="button primary hidden" type="button">شروع بازی</button></div><div id="botControls" class="bot-controls hidden"><button id="removeBot" type="button">− حذف بات</button><span id="botCount">۰ بات</span><button id="addBot" type="button">＋ افزودن بات</button></div><div id="weaponChooser" class="weapon-chooser hidden"><button type="button" data-weapon="sniper"><b>اسنایپر</b><small>دوربین ۲، ۴ و ۸ برابر</small></button><button type="button" data-weapon="rpg"><b>موشک‌انداز</b><small>قفل روی هدف</small></button><button type="button" data-weapon="heavy"><b>توپ سنگین</b><small>قدرت تخریب بالا</small></button><button type="button" data-weapon="rapid"><b>رگبار سریع</b><small>سرعت شلیک بالا</small></button><button type="button" data-weapon="spread"><b>سه‌تیر</b><small>پوشش بیشتر</small></button></div></div>
         <div id="toast" class="toast" aria-live="polite"></div><div id="movePad" class="touch-pad move-pad"><div class="pad-ring"><i class="pad-knob"></i></div></div>
         <div class="explosive-controls"><button id="grenadeButton" class="explosive grenade hidden" type="button" aria-label="پرتاب نارنجک" title="نارنجک"><span>●</span><em id="grenadeCount">۰</em></button><button id="rpgButton" class="explosive rpg hidden" type="button" aria-label="شلیک RPG" title="RPG"><span>➤</span><em id="rpgCount">۰</em></button></div>
+        <div id="scopeOverlay" aria-hidden="true"></div>
+        <div class="combat-kit"><div id="ammoBadge"></div><div id="lockBadge" role="status"></div><div class="kit-buttons">
+        <button id="switchWeapon" type="button">تعویض سلاح Q</button><button id="zoomButton" class="hidden" type="button">زوم X</button>
+        <button id="crouchButton" type="button">نشستن C</button><button id="proneButton" type="button">درازکش Z</button></div></div>
         <div class="right-controls"><div class="ability-row"><button id="jumpButton" class="ability jump" type="button" aria-label="پرش" title="پرش"><span>↥</span></button></div><button id="fireButton" class="fire-button" type="button"><span>●</span><b>شلیک</b></button></div>
       </section>
     </main>
-    <script src="/static/renderer3d.js?v=5.0.0"></script><script src="/static/game.js?v=5.0.0" defer></script>
+    <script src="/static/renderer3d.js?v=5.1.0"></script><script src="/static/game.js?v=5.1.0" defer></script>
   </body>
 </html>
+

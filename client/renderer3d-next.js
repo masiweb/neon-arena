@@ -52,6 +52,7 @@ const QUALITY = {
 const MODEL_FILES = {
   soldier: "soldier.gltf",
   base: "ak.gltf",
+  sniper: "ak.gltf",
   rapid: "smg.gltf",
   spread: "shotgun.gltf",
   heavy: "short_cannon.gltf",
@@ -88,12 +89,19 @@ const WEAPON_NODES = [
 
 const WEAPON_NODE = {
   base: "AK",
+  sniper: "Sniper",
+  rpg: "RocketLauncher",
   rapid: "SMG",
   spread: "Shotgun",
   heavy: "ShortCannon",
 };
 
 const POWER_COLORS = {
+  ammo: 0xffcc44,
+  sniper: 0x80eaff,
+  rapid: 0xaaff44,
+  heavy: 0xffaa44,
+  spread: 0xff66aa,
   speed: 0xffc83d,
   health: 0xff405f,
   shield: 0x29d8ff,
@@ -1006,6 +1014,8 @@ class NeonRendererNext {
       model.position.y = -bounds.min.y * scale;
       root.add(model);
       actor.model = model;
+      actor.baseModelY = model.position.y;
+      actor.poseBones = [];
       actor.mixer = new THREE.AnimationMixer(model);
       for (const clip of gltf.animations || []) actor.actions.set(clip.name, actor.mixer.clipAction(clip));
       this.setActorWeapon(actor, player.weapon || "base");
@@ -1104,9 +1114,10 @@ class NeonRendererNext {
       let actor = this.actorMap.get(player.id);
       if (!actor) actor = this.createActor(player);
       const distance = Math.hypot(player.x - frame.me.x, player.y - frame.me.y);
-      actor.root.visible = Boolean(player.alive) && distance < this.quality.distance;
+      actor.root.visible = Boolean(player.alive) && distance < (frame.me.weapon === "sniper" && frame.me.zoom > 1 ? 4500 : this.quality.distance);
       if (!actor.root.visible) continue;
       actor.root.position.set(player.x, Number(player.z || 0), player.y);
+
       const targetYaw = Math.atan2(player.aim?.[1] || 0, player.aim?.[0] || 1);
       const deltaYaw = Math.atan2(Math.sin(targetYaw - actor.yaw), Math.cos(targetYaw - actor.yaw));
       actor.yaw += deltaYaw * Math.min(1, frame.dt * 15);
@@ -1120,7 +1131,20 @@ class NeonRendererNext {
         : player.shooting ? "Idle_Shoot"
         : "Idle";
       this.setActorAnimation(actor, animation);
+      for (const [bone,rotation] of actor.poseBones || []) bone.rotation.copy(rotation);
+      actor.poseBones = [];
       actor.mixer?.update(Math.min(frame.dt, 0.05));
+      if (actor.model) {
+        actor.model.rotation.x = player.stance === "prone" ? -PI/2 : 0;
+        actor.model.position.y = player.stance === "prone" ? 14 : actor.baseModelY - (player.stance === "crouch" ? 22 : 0);
+        actor.model.position.z = player.stance === "prone" ? -32 : 0;
+        if (player.stance === "crouch") {
+          for (const [name,angle] of [["UpperLeg.L",-.9],["UpperLeg.R",-.9],["LowerLeg.L",1.5],["LowerLeg.R",1.5]]) {
+            const bone = actor.model.getObjectByName(name);
+            if (bone) { actor.poseBones.push([bone,bone.rotation.clone()]); bone.rotation.x += angle; }
+          }
+        }
+      }
     }
     for (const [id, actor] of this.actorMap) {
       if (current.has(id)) continue;
@@ -1145,7 +1169,13 @@ class NeonRendererNext {
     ring.rotation.x = PI / 2;
     ring.position.y = 8;
     let core;
-    if (item.kind === "grenade" && this.models.has("grenade")) {
+    if (["base","heavy","rapid","spread","sniper"].includes(item.kind) && this.models.has(item.kind)) {
+      core = fitModelUniform(this.models.get(item.kind),55,false);
+    } else if (item.kind === "ammo") {
+      core = new THREE.Mesh(new THREE.BoxGeometry(35,22,25),new THREE.MeshStandardMaterial({color:0x61713b,roughness:.8}));
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(36,5,26),new THREE.MeshStandardMaterial({color:0xffcc44}));
+      core.add(stripe);
+    } else if (item.kind === "grenade" && this.models.has("grenade")) {
       core = fitModelUniform(this.models.get("grenade"), 30, false);
     } else if (item.kind === "rpg" && this.models.has("rpg")) {
       core = fitModelUniform(this.models.get("rpg"), 52, false);
@@ -1191,7 +1221,13 @@ class NeonRendererNext {
 
   createProjectile(item) {
     let object;
-    if (item.kind === "grenade" && this.models.has("grenade")) {
+    if (["base","heavy","rapid","spread","sniper"].includes(item.kind) && this.models.has(item.kind)) {
+      core = fitModelUniform(this.models.get(item.kind),55,false);
+    } else if (item.kind === "ammo") {
+      core = new THREE.Mesh(new THREE.BoxGeometry(35,22,25),new THREE.MeshStandardMaterial({color:0x61713b,roughness:.8}));
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(36,5,26),new THREE.MeshStandardMaterial({color:0xffcc44}));
+      core.add(stripe);
+    } else if (item.kind === "grenade" && this.models.has("grenade")) {
       object = fitModelUniform(this.models.get("grenade"), 18, false);
     } else if (item.kind === "rpg") {
       object = new THREE.Group();
@@ -1358,6 +1394,13 @@ class NeonRendererNext {
           object.material.depthTest = true;
           object.material.depthWrite = true;
         });
+        if (kind === "sniper") {
+          model.scale.z *= 1.45;
+          const scope = new THREE.Mesh(new THREE.CylinderGeometry(3.2,3.2,29,16),new THREE.MeshStandardMaterial({color:0x16212b,metalness:.75,roughness:.25}));
+          scope.rotation.x = PI/2;
+          scope.position.set(18,-25,-68);
+          this.weaponHolder.add(scope);
+        }
         this.weaponHolder.add(model);
         this.addArms();
       } else {
@@ -1413,7 +1456,10 @@ class NeonRendererNext {
     if (requiredWorldKey !== this.worldKey) this.rebuildWorld(frame.arena);
     const movement = Math.min(1, Math.hypot(frame.move?.[0] || 0, frame.move?.[1] || 0));
     const eyeBob = Math.sin(this.bobTime * 2) * 0.72 * movement;
-    const eyeY = Number(frame.me.z || 0) + 63 + eyeBob;
+    const zoom = frame.me.weapon === "sniper" ? Number(frame.me.zoom || 1) : 1;
+    this.camera.fov = THREE.MathUtils.radToDeg(2*Math.atan(Math.tan(THREE.MathUtils.degToRad(70)/2)/zoom));
+    this.camera.updateProjectionMatrix();
+    const eyeY = Number(frame.me.z || 0) + Number(frame.me.height || 72)*.875 + eyeBob;
     this.camera.position.set(frame.me.x, eyeY, frame.me.y);
     this.camera.rotation.set(frame.pitch || 0, -PI / 2 - (frame.angle || 0), 0, "YXZ");
     this.sky.position.copy(this.camera.position);
@@ -1437,7 +1483,7 @@ class NeonRendererNext {
     this.renderer.render(this.scene, this.camera);
     this.renderer.autoClear = false;
     this.renderer.clearDepth();
-    this.renderer.render(this.weaponScene, this.weaponCamera);
+    if (!(frame.me.weapon === "sniper" && frame.me.zoom > 1)) this.renderer.render(this.weaponScene, this.weaponCamera);
     this.renderer.autoClear = true;
     this.adaptResolution(frame.now);
   }
@@ -1458,3 +1504,4 @@ window.NeonRenderer3D = {
     return new NeonRendererNext(canvas);
   },
 };
+

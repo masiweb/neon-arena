@@ -53,7 +53,7 @@ public final class MainActivity extends Activity {
         settings.setSupportZoom(false);
         settings.setTextZoom(100);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " NeonArenaAndroid/5.0.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " NeonArenaAndroid/5.1.0");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             settings.setSafeBrowsingEnabled(true);
         }
@@ -202,3 +202,4 @@ public final class MainActivity extends Activity {
         super.onDestroy();
     }
 }
+

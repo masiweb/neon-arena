@@ -53,13 +53,20 @@
   const rpgButton = $("rpgButton");
 
   const weaponNames = {
-    base: "معمولی",
+    base: "AK تک‌تیر",
+    sniper: "اسنایپر",
+    rpg: "موشک‌انداز",
     heavy: "توپ سنگین",
     rapid: "رگبار سریع",
     spread: "سه‌تیر",
   };
 
   const powerupStyle = {
+    ammo: {color:"#ffc84f",icon:"▤",label:"مهمات"},
+    sniper: {color:"#80eaff",icon:"⌖",label:"اسنایپر"},
+    heavy: {color:"#ffc84f",icon:"✦",label:"توپ سنگین"},
+    rapid: {color:"#b0ff55",icon:"✦",label:"SMG"},
+    spread: {color:"#ff80c0",icon:"✦",label:"شاتگان"},
     speed: { color: "#ffd52a", icon: "⚡", label: "سرعت" },
     health: { color: "#ff4f6f", icon: "+", label: "خون" },
     shield: { color: "#20d9ff", icon: "◇", label: "سپر" },
@@ -70,10 +77,12 @@
   };
 
   const localWeaponSpecs = {
+    sniper: {interval:1300,radius:4,spread:[0]},
+    rpg: {interval:1200,radius:9,spread:[]},
     base: { interval: 220, radius: 6, spread: [0] },
     heavy: { interval: 460, radius: 9, spread: [0] },
-    rapid: { interval: 105, radius: 5, spread: [-.015, .015] },
-    spread: { interval: 390, radius: 5, spread: [-.09, 0, .09] },
+    rapid: { interval: 105, radius: 5, spread: [0] },
+    spread: { interval: 650, radius: 5, spread: [-.09,-.045,0,.045,.09] },
   };
 
   const isAndroidApp = location.protocol === "file:";
@@ -85,7 +94,7 @@
   const wsOrigin = isAndroidApp
     ? androidServerOrigin.replace(/^https:/, "wss:")
     : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
-  const protocolVersion = "11";
+  const protocolVersion = "12";
   if (isAndroidApp) {
     $("downloadAndroid")?.classList.add("hidden");
     $("downloadAndroidLobby")?.classList.add("hidden");
@@ -400,7 +409,7 @@
       updateHud(previous);
       return;
     }
-    if (message.type === "event") notify(message.message);
+    if (message.type === "event") { notify(message.message); if (message.event === "powerup") playPickup(); }
     if (message.type === "voice_peers") handleVoicePeers(message.peers || []);
     if (message.type === "voice_signal") handleVoiceSignal(message.from, message.signal).catch(() => notify("اتصال صوتی یکی از کاربران برقرار نشد"));
     if (message.type === "forced_leave") {
@@ -464,13 +473,27 @@
     healthText.textContent = `${fa.format(me.health)}٪`;
     lives.innerHTML = Array.from({ length: 3 }, (_, index) => `<i class="${index < me.lives ? "" : "lost"}">♥</i>`).join("");
     myScore.textContent = fa.format(me.score);
+    const zoom = me.weapon === "sniper" ? (me.zoom || 1) : 1;
+    document.body.classList.toggle("scoped",zoom > 1);
+    $("zoomButton").classList.toggle("hidden",me.weapon !== "sniper");
+    $("zoomButton").textContent = `زوم ${zoom}×`;
+    $("switchWeapon").disabled = !me.alive || (me.inventory || []).length < 2;
+    $("crouchButton").classList.toggle("selected",me.stance === "crouch");
+    $("proneButton").classList.toggle("selected",me.stance === "prone");
+    $("ammoBadge").textContent = `تیر: ${fa.format(me.ammo?.[me.weapon] || 0)} · ${(me.inventory || []).map(w=>weaponNames[w]).join(" / ")}`;
+    $("lockBadge").textContent = me.weapon !== "rpg" ? "" : me.lockReady ? "قفل شد ـ شلیک" : me.lockTarget ? `قفل ${Math.round(me.lockProgress*100)}٪` : "برای قفل، دشمن را در نشانه نگه دارید";
+    if (app.lastWeapon && app.lastWeapon !== me.weapon) playWeaponSwitch();
+    app.lastWeapon = me.weapon;
+    const ammoTotal = Object.values(me.ammo || {}).reduce((a,b)=>a+b,0);
+
+    app.lastAmmoTotal = ammoTotal;
     weaponBadge.textContent = `سلاح: ${weaponNames[me.weapon] || weaponNames.base}${me.speedBoost ? " · سرعت+" : ""}${me.radarHidden ? " · اختفا" : ""}`;
     $("grenadeCount").textContent = fa.format(me.grenades || 0);
     $("rpgCount").textContent = fa.format(me.rockets || 0);
     grenadeButton.classList.toggle("hidden", !(me.grenades > 0));
-    rpgButton.classList.toggle("hidden", !(me.rockets > 0));
+    rpgButton.classList.toggle("hidden", !(me.rockets > 0 && me.weapon === "rpg"));
     grenadeButton.disabled = !me.alive || state.phase !== "playing" || !(me.grenades > 0);
-    rpgButton.disabled = !me.alive || state.phase !== "playing" || !(me.rockets > 0);
+    rpgButton.disabled = !me.alive || state.phase !== "playing" || !(me.rockets > 0 && me.weapon === "rpg");
     mapBadge.textContent = `نقشه: ${state.mapName || app.arena.name || "نئون"}`;
 
     if (me.health < app.previousHealth) {
@@ -491,7 +514,7 @@
     if (state.phase !== "ended") $("resultAd").classList.add("hidden");
     updateScores(state.players);
     updateCenterMessage();
-    jumpButton.disabled = !me.grounded || state.phase !== "playing" || !me.alive;
+    jumpButton.disabled = !me.grounded || me.stance !== "stand" || state.phase !== "playing" || !me.alive;
     jumpButton.classList.toggle("cooling", jumpButton.disabled);
 
     if (previous?.bullets) {
@@ -509,6 +532,10 @@
           }
         }
       }
+    }
+    const oldProjectiles = new Set((previous?.projectiles || []).map(p=>p.id));
+    for (const projectile of state.projectiles || []) {
+      if (!oldProjectiles.has(projectile.id) && projectile.kind === "rpg") playShot(projectile.owner === app.playerId,"rpg");
     }
     if (previous?.explosions) {
       const oldExplosions = new Set(previous.explosions.map((item) => item.id));
@@ -654,9 +681,10 @@
   function rotateCamera(dx, dy, pointerType) {
     const mouse = pointerType === "mouse";
     const yawSensitivity = mouse ? .00205 : .0038;
-    const pitchSensitivity = mouse ? .00165 : .0027;
+    const zoom = app.state?.players.find(p=>p.id===app.playerId)?.zoom || 1;
+    const pitchSensitivity = (mouse ? .00165 : .0027) / zoom;
     const maxDelta = mouse ? 110 : 68;
-    app.cameraAngle += Math.max(-maxDelta, Math.min(maxDelta, dx)) * yawSensitivity;
+    app.cameraAngle += Math.max(-maxDelta, Math.min(maxDelta, dx)) * yawSensitivity / zoom;
     app.cameraPitch = Math.max(-.48, Math.min(.42, app.cameraPitch - Math.max(-58, Math.min(58, dy)) * pitchSensitivity));
     if (Math.abs(dy) > 1.5) app.lastPitchInputAt = performance.now();
   }
@@ -753,8 +781,8 @@
       const delta = Math.atan2(Math.sin(direction - app.cameraAngle), Math.cos(direction - app.cameraAngle));
       const angleError = Math.abs(delta);
       const score = angleError * 900 + distance;
-      const bodyPitch = Math.atan2(((player.z || 0) + 40) - ((me.z || 0) + 63), distance || 1);
-      if (distance < maximumDistance && angleError < cone && score < bestScore && hasLineOfSight(me.x, me.y, player.x, player.y, (me.z || 0) + 63, bodyPitch)) {
+      const bodyPitch = Math.atan2(((player.z || 0) + (player.height || 72)*.55) - ((me.z || 0) + (me.height || 72)*.875), distance || 1);
+      if (distance < maximumDistance && angleError < cone && score < bestScore && hasLineOfSight(me.x, me.y, player.x, player.y, (me.z || 0) + (me.height || 72)*.875, bodyPitch)) {
         best = { player, direction, delta, distance, bodyPitch };
         bestScore = score;
       }
@@ -873,7 +901,15 @@
   function playShot(isMine, weapon = "base") {
     if (!app.audioContext || app.audioMuted) return;
     const scale = isMine ? 1 : .28;
-    if (weapon === "heavy") {
+    if (weapon === "sniper") {
+      noiseBurst(.035,.14*scale,6500);
+      tone(95,.32,.13*scale,"sawtooth",.01,"effects",28);
+      noiseBurst(.3,.045*scale,1700,.1);
+      tone(750,.045,.025*scale,"square",.48,"effects",210);
+    } else if (weapon === "rpg") {
+      noiseBurst(.55,.12*scale,1300);
+      tone(140,.5,.1*scale,"sawtooth",0,"effects",35);
+    } else if (weapon === "heavy") {
       tone(155, .16, .11 * scale, "sawtooth", 0, "effects", 48);
       tone(72, .2, .085 * scale, "sine", .006, "effects", 34);
       noiseBurst(.14, .095 * scale, 1500);
@@ -889,6 +925,16 @@
       tone(680, .035, .03 * scale, "sawtooth", .004, "effects", 260);
       noiseBurst(.065, .045 * scale, 3200);
     }
+  }
+
+  function playWeaponSwitch() {
+    if (!app.audioContext || app.audioMuted) return;
+    noiseBurst(.035,.05,4200); noiseBurst(.055,.04,1900,.09);
+    tone(480,.035,.025,"square",.07,"effects",160);
+  }
+  function playPickup() {
+    if (!app.audioContext || app.audioMuted) return;
+    [520,780,1040].forEach((f,i)=>tone(f,.12,.025,"sine",i*.055));
   }
 
   function playHit(hitZone = "body") {
@@ -931,7 +977,7 @@
   function predictShot(now) {
     if (!app.shooting || app.state?.phase !== "playing") return;
     const me = app.state.players.find((player) => player.id === app.playerId);
-    if (!me?.alive) return;
+    if (!me?.alive || !(me.ammo?.[me.weapon] > 0) || me.weapon === "rpg") return;
     const spec = localWeaponSpecs[me.weapon] || localWeaponSpecs.base;
     if (now - app.lastPredictedShot < spec.interval) return;
     app.lastPredictedShot = now;
@@ -944,7 +990,7 @@
       const angle = baseAngle + spread;
       const dx = Math.cos(angle);
       const dy = Math.sin(angle);
-      const shotHeight = (rendered.z || 0) + 63;
+      const shotHeight = (rendered.z || 0) + (me.height || 72)*.875;
       const end = traceEnd(rendered.x + dx * 31, rendered.y + dy * 31, dx, dy, 920, shotHeight, app.cameraPitch);
       app.localBullets.push({
         id: `local-${now}-${spread}`,
@@ -1272,6 +1318,9 @@
     const button = event.target.closest("[data-weapon]");
     if (button) send({ type: "choose_weapon", weapon: button.dataset.weapon });
   });
+  for (const [id,kind] of [["switchWeapon","switch_weapon"],["zoomButton","zoom"],["crouchButton","crouch"],["proneButton","prone"]]) {
+    $(id).addEventListener("pointerdown",event=>{event.preventDefault();action(kind);});
+  }
   jumpButton.addEventListener("pointerdown", () => action("jump"));
   grenadeButton.addEventListener("pointerdown", () => action("grenade"));
   rpgButton.addEventListener("pointerdown", () => action("rpg"));
@@ -1316,6 +1365,10 @@
     if (event.key.toLowerCase() === "shift") action("dash");
     if (event.key.toLowerCase() === "g") action("grenade");
     if (event.key.toLowerCase() === "r") action("rpg");
+    if (event.key.toLowerCase() === "q") action("switch_weapon");
+    if (event.key.toLowerCase() === "c") action("crouch");
+    if (event.key.toLowerCase() === "z") action("prone");
+    if (event.key.toLowerCase() === "x") action("zoom");
   });
   window.addEventListener("keyup", (event) => {
     app.keys.delete(event.key.toLowerCase());
@@ -1424,7 +1477,7 @@
     const cosine = Math.cos(camera.angle), sine = Math.sin(camera.angle);
     const depth = dx * cosine + dy * sine;
     const side = -dx * sine + dy * cosine;
-    const focal = canvas.width * .78;
+    const focal = canvas.width * .78 * (camera.me.weapon === "sniper" ? camera.me.zoom || 1 : 1);
     if (depth < 16 || Math.abs(side / depth) > .72) return null;
     return { x: canvas.width / 2 + side / depth * focal, depth, scale: focal / depth };
   }
@@ -1633,11 +1686,19 @@
       mapCtx.strokeRect(pad + rect.x * sx, pad + rect.y * sy, Math.max(1, rect.w * sx), Math.max(1, rect.h * sy));
     }
     for (const player of app.state.players) {
-      if (!player.alive || (player.radarHidden && player.id !== app.playerId)) continue;
+      if (!player.alive || player.id !== app.playerId) continue;
       const x = pad + player.x * sx, y = pad + player.y * sy;
       mapCtx.fillStyle = player.id === app.playerId ? "#fff" : player.color; mapCtx.shadowColor = player.color; mapCtx.shadowBlur = 6 * dpr; mapCtx.beginPath(); mapCtx.arc(x, y, (player.id === app.playerId ? 5.2 : 4.1) * dpr, 0, Math.PI * 2); mapCtx.fill();
       if (player.id === app.playerId) { const angle = app.cameraAngle; mapCtx.strokeStyle = player.color; mapCtx.lineWidth = 1.4 * dpr; mapCtx.beginPath(); mapCtx.moveTo(x, y); mapCtx.lineTo(x + Math.cos(angle) * 15 * dpr, y + Math.sin(angle) * 15 * dpr); mapCtx.stroke(); }
     }
+    for (const trail of app.state.footprints || []) {
+      mapCtx.globalAlpha = Math.max(.2,1-trail.age/2.5);
+      mapCtx.fillStyle = trail.color || "#ff9060";
+      const tx=pad+trail.x*sx, ty=pad+trail.y*sy;
+      mapCtx.beginPath(); mapCtx.ellipse(tx-2*dpr,ty,1.4*dpr,2.5*dpr,-.35,0,Math.PI*2); mapCtx.fill();
+      mapCtx.beginPath(); mapCtx.ellipse(tx+2*dpr,ty-2*dpr,1.4*dpr,2.5*dpr,.35,0,Math.PI*2); mapCtx.fill();
+    }
+    mapCtx.globalAlpha=1;
     mapCtx.shadowBlur = 0; mapCtx.strokeStyle = accent; mapCtx.lineWidth = dpr; mapCtx.strokeRect(.5 * dpr, .5 * dpr, width - dpr, height - dpr);
   }
 
@@ -1689,7 +1750,7 @@
 
     const snapshotAge = Math.min(.12, Math.max(0, (performance.now() - app.stateReceivedAt) / 1000));
     if (player.id === app.playerId && player.alive && app.state.phase === "playing") {
-      let speed = 285 * (player.speedBoost ? 1.55 : 1) * (player.dashing ? 2.55 : 1);
+      let speed = 285 * ({stand:1,crouch:.55,prone:.28}[player.stance] || 1) * (player.speedBoost ? 1.55 : 1) * (player.dashing ? 2.55 : 1);
       const desiredX = app.move[0] * speed;
       const desiredY = app.move[1] * speed;
       const acceleration = Math.hypot(desiredX, desiredY) > .1 ? 1 - Math.exp(-25 * dt) : 1 - Math.exp(-34 * dt);
@@ -1714,7 +1775,7 @@
         rendered.y += (targetY - rendered.y) * correction;
       }
     } else {
-      let speed = 285 * (player.speedBoost ? 1.55 : 1) * (player.dashing ? 2.55 : 1);
+      let speed = 285 * ({stand:1,crouch:.55,prone:.28}[player.stance] || 1) * (player.speedBoost ? 1.55 : 1) * (player.dashing ? 2.55 : 1);
       const targetX = player.x + Number(player.move?.[0] || 0) * speed * snapshotAge;
       const targetY = player.y + Number(player.move?.[1] || 0) * speed * snapshotAge;
       const interpolation = 1 - Math.exp(-15 * dt);
@@ -1892,3 +1953,4 @@
 
   draw();
 })();
+

@@ -34,8 +34,8 @@ MAX_PLAYERS = 12
 POWERUP_FIRST_DELAY = 3.5
 POWERUP_SPAWN_MIN = 3.5
 POWERUP_SPAWN_MAX = 5.5
-POWERUP_TTL = 13.0
-MAX_POWERUPS = 8
+POWERUP_TTL = 75.0
+MAX_POWERUPS = 40
 GRENADE_SPEED = 470.0
 GRENADE_LIFT = 360.0
 GRENADE_FUSE = 1.65
@@ -66,17 +66,44 @@ POWERUP_LABELS = {
     "health": "خون اضافه",
     "shield": "سپر دفاعی",
     "weapon": "سلاح قوی‌تر",
+    "ammo": "جعبه مهمات",
+    "sniper": "اسنایپر",
+    "heavy": "توپ سنگین",
+    "rapid": "مسلسل SMG",
+    "spread": "شاتگان",
     "stealth": "اختفای نقشه",
     "grenade": "۳ نارنجک",
     "rpg": "۳ موشک RPG",
 }
 
 WEAPON_SPECS: dict[str, dict[str, Any]] = {
-    "base": {"interval": 0.22, "range": 920.0, "spread": [0.0]},
-    "heavy": {"interval": 0.46, "range": 1050.0, "spread": [0.0]},
-    "rapid": {"interval": 0.105, "range": 820.0, "spread": [-0.015, 0.015]},
-    "spread": {"interval": 0.39, "range": 620.0, "spread": [-0.09, 0.0, 0.09]},
+    "base": {"interval": .22, "range": 1200., "spread": [0.], "damage": 1., "capacity": 90},
+    "heavy": {"interval": .46, "range": 1500., "spread": [0.], "damage": 1.8, "capacity": 35},
+    "rapid": {"interval": .105, "range": 950., "spread": [0.], "damage": .65, "capacity": 150},
+    "spread": {"interval": .65, "range": 620., "spread": [-.09, -.045, 0., .045, .09], "damage": .55, "capacity": 24},
+    "sniper": {"interval": 1.3, "range": 4200., "spread": [0.], "damage": 3.2, "capacity": 15},
+    "rpg": {"interval": 1.2, "range": 2400., "spread": [], "damage": 5., "capacity": 6},
 }
+RADAR_RANGE = 650.0
+FOOTPRINT_TTL = 2.5
+STANCE_HEIGHT = {"stand": 72.0, "crouch": 46.0, "prone": 22.0}
+STANCE_SPEED = {"stand": 1.0, "crouch": .55, "prone": .28}
+
+
+def enemy(a: "Player", b: "Player") -> bool:
+    return a.id != b.id and not (a.team_id is not None and a.team_id == b.team_id)
+
+
+def visible_footprints(observer: "Player", target: "Player", now: float) -> list[dict[str, float]]:
+    if not observer.alive or not target.alive or observer.id == target.id:
+        return []
+    if target.stance != "stand" or target.radar_hidden_until > now:
+        return []
+    if math.hypot(observer.x-target.x, observer.y-target.y) > RADAR_RANGE:
+        return []
+    return [{"x": x, "y": y, "age": round(now-t, 2)} for x,y,t in target.footprints
+            if 0 <= now-t <= FOOTPRINT_TTL and math.hypot(observer.x-x, observer.y-y) <= RADAR_RANGE]
+
 
 HIT_ZONE_DAMAGE = {"head": 100, "neck": 90, "body": 25, "limb": 10}
 
@@ -322,6 +349,15 @@ class Player:
     base_weapon: str = "base"
     weapon: str = "base"
     weapon_until: float = 0.0
+    inventory: list[str] = field(default_factory=lambda: ["base"])
+    ammo: dict[str, int] = field(default_factory=lambda: {"base": 90})
+    stance: str = "stand"
+    zoom: int = 1
+    footprints: list[tuple[float, float, float]] = field(default_factory=list)
+    last_footprint_at: float = 0.0
+    lock_target: str | None = None
+    lock_since: float = 0.0
+    lock_ready: bool = False
     radar_hidden_until: float = 0.0
     grenades: int = 0
     rockets: int = 0
@@ -357,7 +393,11 @@ class Player:
             "speedBoost": self.speed_until > now,
             "dashing": self.dash_until > now,
             "weapon": self.weapon,
-            "radarHidden": self.radar_hidden_until > now,
+            "inventory": list(self.inventory), "ammo": dict(self.ammo),
+            "stance": self.stance, "height": STANCE_HEIGHT[self.stance], "zoom": self.zoom,
+            "lockTarget": self.lock_target, "lockReady": self.lock_ready,
+            "lockProgress": min(1., max(0., (now-self.lock_since)/1.25)) if self.lock_target else 0.,
+            "radarHidden": self.radar_hidden_until > now or self.stance != "stand",
             "bot": self.is_bot,
             "accountId": self.account_id,
             "teamId": self.team_id,
@@ -432,6 +472,7 @@ class Projectile:
     vy: float
     vz: float
     explodes_at: float
+    target_id: str | None = None
 
     def public(self) -> dict[str, Any]:
         return {
@@ -650,18 +691,31 @@ class Room:
         elif kind == "action" and self.phase == "playing" and player.alive:
             action = payload.get("action")
             now = time.monotonic()
-            if action == "dash" and now >= player.dash_ready_at:
+            if action == "switch_weapon":
+                if len(player.inventory) == 2:
+                    player.weapon = player.inventory[1-player.inventory.index(player.weapon)]
+                    player.zoom = 1
+                    player.lock_target = None
+                    player.lock_ready = False
+                    player.last_shot = now
+            elif action in {"crouch", "prone"} and player.grounded:
+                player.stance = "stand" if player.stance == action else action
+                player.footprints.clear()
+                player.dash_until = 0.
+            elif action == "zoom" and player.weapon == "sniper":
+                player.zoom = {1: 2, 2: 4, 4: 8, 8: 1}[player.zoom]
+            elif action == "dash" and player.stance == "stand" and now >= player.dash_ready_at:
                 player.dash_until = now + 0.28
                 player.dash_ready_at = now + 4.0
             elif action == "shield" and now >= player.shield_ready_at:
                 player.shield_until = max(player.shield_until, now + 1.4)
                 player.shield_ready_at = now + 7.0
-            elif action == "jump" and player.grounded:
+            elif action == "jump" and player.grounded and player.stance == "stand":
                 player.velocity_z = JUMP_VELOCITY
                 player.grounded = False
             elif action == "grenade" and player.grenades > 0:
                 self._throw_grenade(player, now)
-            elif action == "rpg" and player.rockets > 0:
+            elif action == "rpg" and player.weapon == "rpg" and player.rockets > 0:
                 self._launch_rpg(player, now)
         elif kind == "reset" and player.id == self.host_id:
             await self._reset_round(player)
@@ -742,7 +796,7 @@ class Room:
         self.map_id = map_id
         placed: list[Player] = []
         for member in self.players.values():
-            member.x, member.y = spawn_point(placed, self.arena)
+            member.x, member.y = self._faction_spawn(member, placed)
             member.z = 0.0
             member.velocity_z = 0.0
             member.grounded = True
@@ -764,7 +818,7 @@ class Room:
             player.id != self.winner_id
             or self.phase not in {"ended", "lobby"}
             or self.winner_choice
-            or weapon not in {"heavy", "rapid", "spread"}
+            or weapon not in {"heavy", "rapid", "spread", "sniper", "rpg"}
         ):
             return
         player.reward_weapon = weapon
@@ -800,14 +854,21 @@ class Room:
             member.grounded = True
             member.base_weapon = member.reward_weapon or "base"
             member.weapon = member.base_weapon
+            member.inventory = list(dict.fromkeys(["base", member.base_weapon]))
+            member.ammo = {w: WEAPON_SPECS[w]["capacity"] for w in member.inventory}
+            member.stance = "stand"
+            member.zoom = 1
+            member.footprints.clear()
+            member.lock_target = None
+            member.lock_ready = False
             member.weapon_until = 0.0
             member.radar_hidden_until = 0.0
             member.grenades = 0
-            member.rockets = 0
+            member.rockets = member.ammo.get("rpg", 0)
             member.last_explosive_at = 0.0
             member.round_kills = 0
             member.reward_weapon = None
-            member.x, member.y = spawn_point(placed, self.arena)
+            member.x, member.y = self._faction_spawn(member, placed)
             placed.append(member)
             if member.account_id is not None:
                 self.round_accounts[member.account_id] = member.name
@@ -854,10 +915,57 @@ class Room:
             self.phase = "playing"
             self.round_ends_at = now + ROUND_SECONDS
             self.next_powerup_at = now + POWERUP_FIRST_DELAY
+            for player in self.players.values():
+                for kind in ("ammo", random.choice(["heavy","rapid","spread","sniper","rpg"])):
+                    x,y = item_spawn_point([player],self.powerups,self.arena)
+                    self.powerups.append(PowerUp(secrets.token_hex(4),kind,x,y,now+75))
         elif self.phase == "ended" and now >= self.return_to_lobby_at:
             self.phase = "lobby"
             self.bullets.clear()
             self.powerups.clear()
+
+    def _faction_spawn(self, player: Player, placed: list[Player]) -> tuple[float, float]:
+        def faction(p):
+            return ("team", p.team_id) if p.team_id is not None else ("solo", p.id)
+        groups = list(dict.fromkeys(faction(p) for p in self.players.values()))
+        index = groups.index(faction(player))
+        angle = math.tau * index / max(1, len(groups))
+        width, height = self.arena["width"], self.arena["height"]
+        cx, cy = width*(.5+.39*math.cos(angle)), height*(.5+.39*math.sin(angle))
+        for _ in range(240):
+            x, y = cx+random.uniform(-220,220), cy+random.uniform(-220,220)
+            if clear_position(x,y,arena=self.arena) and all(math.hypot(x-p.x,y-p.y) > (800 if enemy(player,p) else 65) for p in placed):
+                return x,y
+        return nearest_clear_point(self.arena,cx,cy)
+
+    def _line_of_sight(self, a: Player, b: Player) -> bool:
+        dx,dy = b.x-a.x,b.y-a.y
+        distance = math.hypot(dx,dy)
+        if distance < 1: return True
+        start = a.z + STANCE_HEIGHT[a.stance]*.875
+        end = b.z + STANCE_HEIGHT[b.stance]*.55
+        for wall in nearby_obstacles(self.arena,(a.x+b.x)/2,(a.y+b.y)/2,distance/2+30):
+            hit = ray_rect_distance(a.x,a.y,dx/distance,dy/distance,wall,distance)
+            if hit is not None and start+(end-start)*hit/distance <= wall.get("height",100):
+                return False
+        return True
+
+    def _update_lock(self, player: Player, now: float) -> None:
+        candidates = []
+        if player.weapon == "rpg":
+            for target in self.players.values():
+                if not target.alive or not enemy(player,target): continue
+                dx,dy = target.x-player.x,target.y-player.y
+                dist = math.hypot(dx,dy)
+                if not 1 < dist < 2200: continue
+                pitch = math.atan2(target.z+STANCE_HEIGHT[target.stance]*.55-player.z-STANCE_HEIGHT[player.stance]*.875,dist)
+                if (dx*player.aim_x+dy*player.aim_y)/dist < math.cos(.105) or abs(pitch-player.aim_pitch) > .105: continue
+                if player.is_bot and not visible_footprints(player,target,now): continue
+                if self._line_of_sight(player,target): candidates.append((dist,target.id))
+        target_id = min(candidates)[1] if candidates else None
+        if target_id != player.lock_target:
+            player.lock_target, player.lock_since = target_id, now
+        player.lock_ready = target_id is not None and now-player.lock_since >= 1.25
 
     def _update_players(self, dt: float, now: float) -> None:
         living = [player for player in self.players.values() if player.alive]
@@ -866,7 +974,12 @@ class Room:
                 if player.lives > 0 and now >= player.respawn_at:
                     player.alive = True
                     player.health = 100
-                    player.x, player.y = spawn_point(living, self.arena)
+                    player.x, player.y = self._faction_spawn(player, living)
+                    player.stance = "stand"
+                    player.zoom = 1
+                    player.footprints.clear()
+                    player.ammo = {w: WEAPON_SPECS[w]["capacity"] for w in player.inventory}
+                    player.rockets = player.ammo.get("rpg", 0)
                     player.z = 0.0
                     player.velocity_z = 0.0
                     player.grounded = True
@@ -901,7 +1014,8 @@ class Room:
                 player.velocity_z -= GRAVITY * dt
                 player.z = max(0.0, player.z + player.velocity_z * dt)
 
-            speed = PLAYER_SPEED * speed_multiplier
+            speed = PLAYER_SPEED * speed_multiplier * STANCE_SPEED[player.stance]
+            old_position = (player.x, player.y)
             width, height = float(self.arena["width"]), float(self.arena["height"])
             next_x = clamp(player.x + player.move_x * speed * dt, PLAYER_RADIUS, width - PLAYER_RADIUS)
             if clear_position(next_x, player.y, arena=self.arena, z=player.z):
@@ -918,6 +1032,11 @@ class Room:
             elif player.grounded and abs(player.z - support_after) > STEP_CLEARANCE:
                 player.grounded = False
 
+            player.footprints = [f for f in player.footprints if now-f[2] <= FOOTPRINT_TTL]
+            if player.stance == "stand" and math.hypot(player.x-old_position[0],player.y-old_position[1]) > .05 and now-player.last_footprint_at >= .28:
+                player.footprints.append((player.x,player.y,now))
+                player.last_footprint_at = now
+            self._update_lock(player,now)
             self._collect_powerups(player, now)
             if player.shooting:
                 self._fire(player, now)
@@ -926,14 +1045,17 @@ class Room:
         targets = [
             player for player in self.players.values()
             if player.id != bot.id and player.alive
-            and not (bot.team_id is not None and bot.team_id == player.team_id)
+            and enemy(bot, player) and visible_footprints(bot, player, now)
         ]
         if not targets:
-            bot.move_x = bot.move_y = 0.0
+            angle = now*.18 + sum(bot.id.encode())
+            bot.move_x, bot.move_y = math.cos(angle)*.6, math.sin(angle)*.6
+            bot.last_input_at = now
             bot.shooting = False
             return
         target = min(targets, key=lambda player: math.hypot(player.x - bot.x, player.y - bot.y))
-        dx, dy = target.x - bot.x, target.y - bot.y
+        trail = visible_footprints(bot, target, now)[-1]
+        dx, dy = trail["x"] - bot.x, trail["y"] - bot.y
         distance = math.hypot(dx, dy) or 1.0
         difficulty = BOT_DIFFICULTIES[self.bot_difficulty]
         ideal_angle = math.atan2(dy, dx)
@@ -942,7 +1064,7 @@ class Room:
         aim_x, aim_y = math.cos(ideal_angle + aim_error), math.sin(ideal_angle + aim_error)
         bot.aim_x, bot.aim_y = aim_x, aim_y
         bot.aim_pitch = clamp(
-            math.atan2((target.z + 39.0) - (bot.z + SHOT_ORIGIN_HEIGHT), distance),
+            math.atan2((target.z + STANCE_HEIGHT[target.stance]*.55) - (bot.z + STANCE_HEIGHT[bot.stance]*.875), distance),
             -0.48,
             0.42,
         )
@@ -952,7 +1074,7 @@ class Room:
             aim_x * forward - aim_y * strafe,
             aim_y * forward + aim_x * strafe,
         )
-        bot.shooting = distance < float(difficulty["range"])
+        bot.shooting = distance < float(difficulty["range"]) and self._line_of_sight(bot,target)
         bot.last_input_at = now
         if now >= bot.bot_dash_at and distance > 260 and now >= bot.dash_ready_at:
             bot.dash_until = now + 0.28
@@ -975,6 +1097,12 @@ class Room:
         fire_delay = float(BOT_DIFFICULTIES[self.bot_difficulty]["fire_delay"]) if player.is_bot else 1.0
         if now - player.last_shot < spec["interval"] * fire_delay:
             return
+        if player.ammo.get(player.weapon, 0) <= 0:
+            return
+        if player.weapon == "rpg":
+            self._launch_rpg(player, now)
+            return
+        player.ammo[player.weapon] -= 1
         player.last_shot = now
         base_angle = math.atan2(player.aim_y, player.aim_x)
         for spread in spec["spread"]:
@@ -983,7 +1111,7 @@ class Room:
             start_x, start_y = player.x + dx * 31, player.y + dy * 31
             maximum = float(spec["range"])
             wall_distance = maximum
-            shot_height = player.z + SHOT_ORIGIN_HEIGHT
+            shot_height = player.z + STANCE_HEIGHT[player.stance]*.875
             vertical_slope = math.tan(player.aim_pitch)
             boundary_distances = []
             if dx > 1e-9:
@@ -1026,13 +1154,13 @@ class Room:
                 entry = projection - math.sqrt(max(0.0, PLAYER_RADIUS * PLAYER_RADIUS - perpendicular_sq))
                 impact_height = shot_height + vertical_slope * projection
                 relative_height = impact_height - candidate.z
-                if not (0.0 <= relative_height <= PLAYER_HEIGHT):
+                if not (0.0 <= relative_height <= STANCE_HEIGHT[candidate.stance]):
                     continue
                 if 0 <= entry < target_distance:
                     target = candidate
                     target_distance = entry
                     target_height = shot_height + vertical_slope * entry
-                    target_zone = hit_zone(relative_height, math.sqrt(max(0.0, perpendicular_sq)))
+                    target_zone = hit_zone(relative_height*72/STANCE_HEIGHT[candidate.stance], math.sqrt(max(0.0, perpendicular_sq)))
 
             end_distance = target_distance
             end_height = shot_height + vertical_slope * end_distance if target is None else target_height
@@ -1055,7 +1183,7 @@ class Room:
             if target is not None:
                 # An unshielded headshot always removes the target's entire
                 # current health, including temporary bonus health.
-                damage = float(target.health if target_zone == "head" else HIT_ZONE_DAMAGE[target_zone])
+                damage = float(target.health if target_zone == "head" else HIT_ZONE_DAMAGE[target_zone]*spec["damage"])
                 if target.shield_until > now:
                     damage *= 0.25
                 damage = max(1, round(damage))
@@ -1080,7 +1208,7 @@ class Room:
                 kind="grenade",
                 x=player.x + player.aim_x * 34,
                 y=player.y + player.aim_y * 34,
-                z=player.z + 48,
+                z=player.z + STANCE_HEIGHT[player.stance]*.875,
                 vx=player.aim_x * horizontal_speed,
                 vy=player.aim_y * horizontal_speed,
                 vz=GRENADE_LIFT + math.sin(player.aim_pitch) * 260.0,
@@ -1089,10 +1217,13 @@ class Room:
         )
 
     def _launch_rpg(self, player: Player, now: float) -> None:
-        if now - player.last_explosive_at < 0.85 or len(self.projectiles) >= 48:
+        if now - player.last_explosive_at < 1.2 or len(self.projectiles) >= 48:
             return
         player.last_explosive_at = now
+        if player.rockets <= 0: return
         player.rockets -= 1
+        if "rpg" in player.inventory: player.ammo["rpg"] = player.rockets
+        player.last_shot = now
         horizontal_speed = RPG_SPEED * math.cos(player.aim_pitch)
         self.projectiles.append(
             Projectile(
@@ -1101,11 +1232,12 @@ class Room:
                 kind="rpg",
                 x=player.x + player.aim_x * 38,
                 y=player.y + player.aim_y * 38,
-                z=player.z + 48,
+                z=player.z + STANCE_HEIGHT[player.stance]*.875,
                 vx=player.aim_x * horizontal_speed,
                 vy=player.aim_y * horizontal_speed,
                 vz=math.sin(player.aim_pitch) * RPG_SPEED,
-                explodes_at=now + 2.4,
+                explodes_at=now + 4.0,
+                target_id=player.lock_target if player.lock_ready else None,
             )
         )
 
@@ -1113,6 +1245,17 @@ class Room:
         self.explosions = [item for item in self.explosions if item.expires_at > now]
         active: list[Projectile] = []
         for projectile in self.projectiles:
+            if projectile.kind == "rpg" and projectile.target_id:
+                target = self.players.get(projectile.target_id)
+                owner = self.players.get(projectile.owner_id)
+                if target and owner and target.alive and enemy(owner,target) and self._line_of_sight(owner,target):
+                    dx,dy,dz = target.x-projectile.x,target.y-projectile.y,target.z+STANCE_HEIGHT[target.stance]*.5-projectile.z
+                    length = max(1.,math.sqrt(dx*dx+dy*dy+dz*dz))
+                    turn = min(1.,dt*3.)
+                    vx,vy,vz = ((1-turn)*v+turn*d/length*RPG_SPEED for v,d in zip((projectile.vx,projectile.vy,projectile.vz),(dx,dy,dz)))
+                    speed = max(1.,math.sqrt(vx*vx+vy*vy+vz*vz))
+                    projectile.vx,projectile.vy,projectile.vz = (v/speed*RPG_SPEED for v in (vx,vy,vz))
+                else: projectile.target_id = None
             old_x, old_y = projectile.x, projectile.y
             projectile.x += projectile.vx * dt
             projectile.y += projectile.vy * dt
@@ -1226,7 +1369,7 @@ class Room:
             self.powerups.append(
                 PowerUp(
                     id=secrets.token_hex(4),
-                    kind=random.choice(tuple(POWERUP_LABELS)),
+                    kind=random.choice(["ammo", "ammo", *POWERUP_LABELS]),
                     x=x,
                     y=y,
                     expires_at=now + POWERUP_TTL,
@@ -1254,14 +1397,33 @@ class Room:
         elif kind == "shield":
             player.shield_until = max(player.shield_until, now + 6.0)
         elif kind == "weapon":
-            player.weapon = random.choice(["heavy", "rapid", "spread"])
-            player.weapon_until = now + 12.0
+            self._give_weapon(player, random.choice(["heavy", "rapid", "spread", "sniper", "rpg"]))
         elif kind == "stealth":
             player.radar_hidden_until = max(player.radar_hidden_until, now + 10.0)
         elif kind == "grenade":
             player.grenades = min(9, player.grenades + 3)
-        elif kind == "rpg":
-            player.rockets = min(9, player.rockets + 3)
+        elif kind in WEAPON_SPECS:
+            self._give_weapon(player, kind)
+        elif kind == "ammo":
+            for weapon in player.inventory:
+                cap = WEAPON_SPECS[weapon]["capacity"]
+                player.ammo[weapon] = min(cap, player.ammo.get(weapon,0)+max(3,cap//2))
+            player.rockets = player.ammo.get("rpg",0)
+
+    def _give_weapon(self, player: Player, weapon: str) -> None:
+        if weapon not in player.inventory:
+            if len(player.inventory) == 2:
+                replaced = player.weapon
+                player.inventory.remove(replaced)
+                player.ammo.pop(replaced,None)
+            player.inventory.append(weapon)
+        player.weapon = weapon
+        player.weapon_until = 0.
+        player.ammo[weapon] = WEAPON_SPECS[weapon]["capacity"]
+        player.rockets = player.ammo.get("rpg",0)
+        player.zoom = 1
+        player.lock_target = None
+        player.lock_ready = False
 
     def _check_round_end(self, now: float) -> None:
         contenders = [player for player in self.players.values() if player.lives > 0]
@@ -1341,7 +1503,16 @@ class Room:
         }
 
     async def broadcast_state(self, now: float) -> None:
-        await self._broadcast(self.state(now))
+        state = self.state(now)
+        for observer in list(self.players.values()):
+            if observer.socket is None or observer.is_bot: continue
+            footprints = [{"playerId": target.id, "color": target.color, **f}
+                          for target in self.players.values()
+                          for f in visible_footprints(observer,target,now)]
+            try:
+                await observer.socket.send_json({**state, "footprints": footprints, "radarRange": RADAR_RANGE})
+            except Exception:
+                await self.remove_player(observer.id)
 
     async def broadcast_event(self, event: str, message: str) -> None:
         await self._broadcast({"type": "event", "event": event, "message": message})
@@ -1419,3 +1590,4 @@ class GameHub:
     def stats(self) -> dict[str, int]:
         active = [room for room in self.rooms.values() if not room.closed]
         return {"rooms": len(active), "players": sum(len(room.players) for room in active)}
+

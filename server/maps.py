@@ -1,14 +1,12 @@
 """Server-authoritative large arena layouts.
 
-Layouts are authored as compact 3600 x 2100 districts and expanded into a
-mirrored 3 x 3 world.  This keeps the hand-designed cover rhythm while making
-every selectable arena 10800 x 6300 without sending players into an empty
-rectangle.
+Each arena has one continuous layout with unique cover placement, without district tiling.
 """
 
 from __future__ import annotations
 
 from typing import Any
+import random
 
 
 BASE_MAP_WIDTH = 3600
@@ -242,65 +240,33 @@ def _classify_obstacle(item: dict[str, Any], default_material: str) -> dict[str,
 
 
 def _expanded_obstacles(items: list[dict[str, Any]], default_material: str) -> list[dict[str, Any]]:
-    expanded: list[dict[str, Any]] = []
-    for row in range(MAP_LINEAR_SCALE):
-        for column in range(MAP_LINEAR_SCALE):
-            mirror_x = (row + column) % 2 == 1
-            mirror_y = row % 2 == 1
-            offset_x = column * BASE_MAP_WIDTH
-            offset_y = row * BASE_MAP_HEIGHT
-            district: list[dict[str, Any]] = []
-            for source in items:
-                item = _classify_obstacle(source, default_material)
-                local_x = BASE_MAP_WIDTH - int(item["x"]) - int(item["w"]) if mirror_x else int(item["x"])
-                local_y = BASE_MAP_HEIGHT - int(item["y"]) - int(item["h"]) if mirror_y else int(item["y"])
-                item["x"] = offset_x + local_x
-                item["y"] = offset_y + local_y
-                item["district"] = row * MAP_LINEAR_SCALE + column
-                district.append(item)
-
-            # Physical cover is added to the wider avenues between districts.
-            # These are server obstacles, so players cannot walk through the
-            # realistic crates and drums drawn by the client.
-            candidates = (
-                wall(offset_x + 150, offset_y + 150, 82, 82, 68, kind="crate", material="wood"),
-                wall(offset_x + 3340, offset_y + 1830, 58, 58, 72, kind="barrel", material="metal"),
-                wall(offset_x + 1770, offset_y + 120, 145, 62, 54, kind="barrier", material="concrete"),
-                wall(offset_x + 170, offset_y + 1830, 180, 64, 58, kind="barrier", material="concrete"),
-            )
-            for candidate in candidates:
-                candidate["district"] = row * MAP_LINEAR_SCALE + column
-                if not any(
-                    candidate["x"] < other["x"] + other["w"] + 24
-                    and candidate["x"] + candidate["w"] + 24 > other["x"]
-                    and candidate["y"] < other["y"] + other["h"] + 24
-                    and candidate["y"] + candidate["h"] + 24 > other["y"]
-                    for other in district
-                ):
-                    district.append(candidate)
-            expanded.extend(district)
-    return expanded
+    # One continuous authored layout. No mirrored or translated district copies.
+    result = []
+    for source in items:
+        item = _classify_obstacle(source, default_material)
+        for key in ("x", "y", "w", "h"):
+            item[key] = int(item[key] * MAP_LINEAR_SCALE)
+        result.append(item)
+    seed = sum(int(i["x"])+int(i["y"])*7 for i in items)
+    rng = random.Random(seed)
+    for _ in range(500):
+        if len(result) >= len(items)+95: break
+        x,y = rng.randint(280,MAP_WIDTH-400),rng.randint(280,MAP_HEIGHT-400)
+        # Preserve a connected open perimeter and broad crossing routes.
+        if abs(x-MAP_WIDTH*.5)<110 or abs(y-MAP_HEIGHT*.5)<110: continue
+        kind = rng.choice(["crate","barrel","barrier"])
+        w,h,height = {"crate":(82,82,68),"barrel":(58,58,72),"barrier":(180,64,54)}[kind]
+        candidate = wall(x,y,w,h,height,kind=kind,material="wood" if kind=="crate" else default_material)
+        if any(x < o["x"]+o["w"]+80 and x+w+80 > o["x"] and y < o["y"]+o["h"]+80 and y+h+80 > o["y"] for o in result): continue
+        result.append(candidate)
+    return result
 
 
 def _environment_props(map_id: str) -> list[dict[str, Any]]:
-    props: list[dict[str, Any]] = []
-    for row in range(MAP_LINEAR_SCALE):
-        for column in range(MAP_LINEAR_SCALE):
-            ox, oy = column * BASE_MAP_WIDTH, row * BASE_MAP_HEIGHT
-            district = row * MAP_LINEAR_SCALE + column
-            props.extend(
-                [
-                    {"kind": "lamp", "x": ox + 210, "y": oy + 1030, "height": 145, "district": district},
-                    {"kind": "lamp", "x": ox + 3390, "y": oy + 1070, "height": 145, "district": district},
-                    {"kind": "sign", "x": ox + 1800, "y": oy + 205, "height": 96, "yaw": 0, "district": district},
-                    {"kind": "pipe", "x": ox + 1800, "y": oy + 1900, "length": 150, "yaw": 0, "district": district},
-                ]
-            )
-            if map_id in {"brickworks", "reactor"}:
-                props.append({"kind": "tank", "x": ox + 3100, "y": oy + 1030, "height": 105, "district": district})
-            elif map_id == "night_market":
-                props.append({"kind": "awning", "x": ox + 560, "y": oy + 1060, "width": 180, "district": district})
-    return props
+    rng = random.Random(map_id)
+    return [{"kind":"lamp", "x":rng.randint(100,MAP_WIDTH-100),
+             "y": 160 if i%2 else MAP_HEIGHT-160,"height":145}
+            for i in range(18)]
 
 
 def _collision_grid(items: list[dict[str, Any]]) -> dict[tuple[int, int], list[dict[str, Any]]]:
@@ -323,8 +289,8 @@ for _map_id, _arena in MAPS.items():
         str(_arena["theme"]["wallMaterial"]),
     )
     _arena["props"] = _environment_props(_map_id)
-    _arena["sectorWidth"] = BASE_MAP_WIDTH
-    _arena["sectorHeight"] = BASE_MAP_HEIGHT
+    _arena["sectorWidth"] = MAP_WIDTH
+    _arena["sectorHeight"] = MAP_HEIGHT
     _arena["_collisionGrid"] = _collision_grid(_arena["obstacles"])
 
 
@@ -349,3 +315,4 @@ def map_options() -> list[dict[str, str]]:
         {"id": item["id"], "name": item["name"], "description": item["description"]}
         for item in MAPS.values()
     ]
+

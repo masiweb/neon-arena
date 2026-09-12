@@ -83,7 +83,7 @@ class GameRulesTests(unittest.TestCase):
         self.assertIn(DEFAULT_MAP_ID, MAPS)
         self.assertTrue(all(item["width"] == MAP_WIDTH == 10800 for item in MAPS.values()))
         self.assertTrue(all(item["height"] == MAP_HEIGHT == 6300 for item in MAPS.values()))
-        self.assertTrue(all(len(item["obstacles"]) >= 200 for item in MAPS.values()))
+        self.assertTrue(all(len(item["obstacles"]) >= 80 for item in MAPS.values()))
         self.assertTrue(all(item["props"] for item in MAPS.values()))
         self.assertTrue(all(any(wall["height"] <= 65 for wall in item["obstacles"]) for item in MAPS.values()))
         self.assertTrue(all({"wall", "barrier", "crate"} <= {wall["kind"] for wall in item["obstacles"]} for item in MAPS.values()))
@@ -102,8 +102,8 @@ class GameRulesTests(unittest.TestCase):
         self.assertLess(len(candidates), len(arena["obstacles"]) // 3)
         published = public_map(DEFAULT_MAP_ID)
         self.assertNotIn("_collisionGrid", published)
-        self.assertEqual(published["sectorWidth"], 3600)
-        self.assertEqual(published["sectorHeight"], 2100)
+        self.assertEqual(published["sectorWidth"], 10800)
+        self.assertEqual(published["sectorHeight"], 6300)
 
     def test_low_walls_can_be_crossed_at_their_top(self) -> None:
         low_wall = next(item for item in OBSTACLES if item["height"] <= 60)
@@ -147,10 +147,10 @@ class GameRulesTests(unittest.TestCase):
         self.assertEqual(player.health, 135)
         self.assertGreater(player.speed_until, now)
         self.assertGreater(player.shield_until, now)
-        self.assertIn(player.weapon, {"heavy", "rapid", "spread"})
+        self.assertEqual(player.weapon, "rpg")
         self.assertGreater(player.radar_hidden_until, now)
         self.assertEqual(player.grenades, 3)
-        self.assertEqual(player.rockets, 3)
+        self.assertEqual(player.rockets, 6)
         self.assertTrue(player.public(now)["radarHidden"])
 
     def test_winner_can_choose_next_round_weapon(self) -> None:
@@ -247,10 +247,10 @@ class GameRulesTests(unittest.TestCase):
         room.players = {bot.id: bot, target.id: target}
         room._fire(bot, time.monotonic())
         self.assertEqual(target.health, 75)
-        bot.weapon = "heavy"
+        room._give_weapon(bot,"heavy")
         bot.last_shot = 0
         room._fire(bot, time.monotonic())
-        self.assertEqual(target.health, 50)
+        self.assertEqual(target.health, 30)
 
     def test_server_classifies_head_neck_body_and_limb_hits(self) -> None:
         expected = {"head": (60.0, 0), "neck": (53.0, 10), "body": (40.0, 75), "limb": (12.0, 90)}
@@ -315,7 +315,7 @@ class GameRulesTests(unittest.TestCase):
         player.last_explosive_at = 0
         room._apply_powerup(player, "rpg", now)
         asyncio.run(room.handle(player, {"type": "action", "action": "rpg"}))
-        self.assertEqual(player.rockets, 2)
+        self.assertEqual(player.rockets, 5)
         self.assertTrue(any(item.kind == "rpg" for item in room.projectiles))
 
     def test_only_room_owner_can_reset(self) -> None:
@@ -373,3 +373,4 @@ class GameRulesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

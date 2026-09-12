@@ -536,3 +536,8 @@ body.in-game { user-select: none; }
   .voice-menu { right: calc(var(--safe-right) + 40px); }
   .game-status #mapBadge { display: none; }
 }
+
+
+.combat-kit{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);z-index:22;text-align:center;color:#fff;background:#07131dcc;border:1px solid #526679;border-radius:12px;padding:6px;max-width:48vw;font-size:12px}
+.kit-buttons{display:flex;gap:5px;justify-content:center;flex-wrap:wrap}.kit-buttons button{background:#22394d;color:white;border:1px solid #718695;padding:9px;border-radius:7px;touch-action:none}.kit-buttons .selected{background:#20533a;border-color:#80efac}#lockBadge{color:#ffc85c;min-height:1em}#scopeOverlay{display:none;position:absolute;inset:0;pointer-events:none;z-index:7;background:radial-gradient(circle at center,transparent 0,transparent 31vh,#000 32vh);border:none}body.scoped #scopeOverlay{display:block}body.scoped .crosshair{transform:translate(-50%,-50%) scale(.6)}
+@media(max-height:500px){.combat-kit{bottom:5px;font-size:10px}.kit-buttons button{padding:6px;font-size:11px}}
